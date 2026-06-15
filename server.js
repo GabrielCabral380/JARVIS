@@ -105,7 +105,7 @@ function publicConfig() {
     CODEX_ENABLED: String(env.CODEX_ENABLED || 'false').toLowerCase() === 'true',
     CODEX_TIMEOUT_MS: String(env.CODEX_TIMEOUT_MS || '120000'),
     PORT: String(env.PORT || PORT),
-    AUTO_OPEN_BROWSER: String(env.AUTO_OPEN_BROWSER || 'true'),
+    AUTO_OPEN_BROWSER: String(env.AUTO_OPEN_BROWSER || 'false'),
     HERMES_ENABLED: String(env.HERMES_ENABLED || 'true').toLowerCase() === 'true',
     HERMES_URL: env.HERMES_URL || '',
     HERMES_COMMAND: env.HERMES_COMMAND || '',
@@ -1218,7 +1218,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 function openBrowser(port) {
-  if (String(env.AUTO_OPEN_BROWSER || 'true').toLowerCase() === 'false') return;
+  if (String(env.AUTO_OPEN_BROWSER || 'false').toLowerCase() !== 'true') return;
   const target = `http://localhost:${port}`;
   const ok = openUrlWithSystem(target);
   if (!ok) log('browser.open.failed', { error: 'spawn failed', target });

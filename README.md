@@ -32,7 +32,9 @@ Um assistente local estilo JARVIS para Windows: instalação simples, scripts de
    - `OPENAI_MODEL=gpt-4o-mini`
 5. Dê duplo clique em `Ligar JARVIS.bat`.
 
-A interface abre em `http://localhost:3000`.
+A interface fica disponível em `http://localhost:3000`.
+
+Por padrão, o projeto **não abre o navegador sozinho** ao iniciar. Se quiser reativar isso, ajuste `AUTO_OPEN_BROWSER=true` no `.env`.
 
 ## Voz e personalidade
 
