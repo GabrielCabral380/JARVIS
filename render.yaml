@@ -18,6 +18,12 @@ services:
       - key: APPROVAL_POLICY
         value: once
       - key: LOCAL_TOOLS_ENABLED
-        value: true
+        value: false
       - key: LOCAL_TOOLS_REQUIRE_CONFIRMATION
+        value: false
+      - key: HERMES_ENABLED
+        value: false
+      - key: OPENCLAW_ENABLED
+        value: false
+      - key: MCP_ENABLED
         value: false
