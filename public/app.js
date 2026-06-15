@@ -5,6 +5,7 @@ let status = {};
 let config = {};
 let voiceActive = false;
 let recognitionStarting = false;
+let approvalState = { policy: 'once', trusted: [], pending: [] };
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 let recognition = SpeechRecognition ? new SpeechRecognition() : null;
 if (recognition) {
@@ -108,6 +109,12 @@ app.innerHTML = `
       <h3>Ferramentas locais offline</h3>
       <label class="check"><input id="cfg-local-tools-enabled" type="checkbox"/> Ativar ferramentas locais sem IA</label>
       <label class="check"><input id="cfg-local-tools-confirm" type="checkbox"/> Exigir confirmação manual para ferramentas locais</label>
+      <label>Política de aprovação</label>
+      <select id="cfg-approval-policy">
+        <option value="once">Aprovar só na primeira execução</option>
+        <option value="always">Aprovar sempre</option>
+        <option value="off">Não exigir aprovação</option>
+      </select>
       <button id="saveConfig">Salvar Configuração</button>
       <button id="testApi">Testar API agora</button>
       <div id="configResult" class="muted"></div>
@@ -129,6 +136,7 @@ app.innerHTML = `
     </div>
     <h3>▸ LOCAL TOOLS</h3>
     <div id="localRuntime" class="orchestrator">Carregando runtime...</div>
+    <div id="approvalBox" class="orchestrator">Aprovações: carregando...</div>
     <div class="voice-hint">
       Voz ativa aceita: “Jarvis, abra a calculadora”, “pesquise IA na internet”,
       “liste meus lembretes”, “envie para Hermes: ...”, “detecte MCP Hermes OpenClaw”.
@@ -207,6 +215,7 @@ async function refresh() {
   $('#agents').innerHTML = status.agents.map(a => `<p><span class="badge">${a.name}</span> <span class="small">${a.risk}</span></p>`).join('');
   renderOrchestrator(status.orchestrator || {});
   renderLocalRuntime(status.runtime || {}, status.localTools || {});
+  renderApprovals(status.approvals || {});
 }
 
 function renderOrchestrator(orch = {}) {
@@ -234,6 +243,38 @@ function renderLocalRuntime(runtime = {}, localTools = {}) {
   `;
 }
 
+function renderApprovals(approvals = {}) {
+  approvalState = { policy: approvals.policy || 'once', trusted: approvals.trusted || [], pending: approvals.pending || [] };
+  const pending = approvalState.pending || [];
+  $('#approvalBox').innerHTML = `
+    <div class="kv"><span>Política</span><b>${approvalState.policy}</b></div>
+    <div class="kv"><span>Confiadas</span><b>${approvalState.trusted.length}</b></div>
+    <div class="kv"><span>Pendentes</span><b>${pending.length}</b></div>
+    ${pending.length ? pending.slice(0, 3).map(item => `<div class="small">• ${item.label}</div>`).join('') : '<div class="small">Nenhuma aprovação pendente.</div>'}
+  `;
+}
+
+async function approvePending(token, execute = true) {
+  const r = await fetch('/api/approvals/approve', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token, execute })
+  }).then(x => x.json()).catch(e => ({ ok: false, text: e.message }));
+  await refresh();
+  return r;
+}
+
+async function handleApprovalResult(result) {
+  if (!result?.requiresApproval || !result.approval?.token) return result;
+  const go = window.confirm(`${result.text}\n\nDeseja aprovar agora?\nDepois disso, esta ação fica liberada conforme a política atual.`);
+  if (!go) return result;
+  const approved = await approvePending(result.approval.token, true);
+  const msg = approved.text || (approved.ok ? 'Ação aprovada e executada.' : 'Aprovação falhou.');
+  add('assistant', msg);
+  speak(msg);
+  return approved;
+}
+
 async function loadConfig() {
   config = await fetch('/api/config').then(r => r.json());
   $('#cfg-provider').value = config.AI_PROVIDER || 'local';
@@ -251,6 +292,7 @@ async function loadConfig() {
   $('#cfg-mcp-command').value = config.MCP_COMMAND || '';
   $('#cfg-local-tools-enabled').checked = config.LOCAL_TOOLS_ENABLED !== false;
   $('#cfg-local-tools-confirm').checked = Boolean(config.LOCAL_TOOLS_REQUIRE_CONFIRMATION);
+  $('#cfg-approval-policy').value = config.APPROVAL_POLICY || 'once';
   $('#openai-set').textContent = config.OPENAI_API_KEY_SET ? 'definida' : 'não definida';
   $('#openrouter-set').textContent = config.OPENROUTER_API_KEY_SET ? 'definida' : 'não definida';
 }
@@ -273,7 +315,8 @@ async function saveConfig() {
     MCP_URL: $('#cfg-mcp-url').value.trim(),
     MCP_COMMAND: $('#cfg-mcp-command').value.trim(),
     LOCAL_TOOLS_ENABLED: String($('#cfg-local-tools-enabled').checked),
-    LOCAL_TOOLS_REQUIRE_CONFIRMATION: String($('#cfg-local-tools-confirm').checked)
+    LOCAL_TOOLS_REQUIRE_CONFIRMATION: String($('#cfg-local-tools-confirm').checked),
+    APPROVAL_POLICY: $('#cfg-approval-policy').value
   };
   const res = await fetch('/api/config', {
     method: 'POST',
@@ -333,6 +376,11 @@ async function send(text) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ message: text })
   }).then(r => r.json());
+  if (res?.requiresApproval) {
+    add('assistant', res.text || 'Aprovação necessária.');
+    await handleApprovalResult(res);
+    return;
+  }
   const reply = res.text || res.error || 'Sem resposta.';
   add('assistant', reply);
   setMode(res.state || 'IDLE', res.emotion === 'focused' ? '◈' : '◉');
@@ -352,6 +400,11 @@ async function runLocalTool(payload) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(payload)
   }).then(x => x.json()).catch(e => ({ ok: false, text: e.message }));
+  if (r?.requiresApproval) {
+    add('assistant', r.text || 'Aprovação necessária.');
+    await handleApprovalResult(r);
+    return r;
+  }
   const msg = r.text || (r.ok ? 'Ação local executada.' : 'Ação local falhou.');
   add('assistant', msg);
   speak(msg);
@@ -417,6 +470,11 @@ async function sendOrchestrator(target) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ target, command })
   }).then(x => x.json()).catch(e => ({ ok: false, text: e.message }));
+  if (r?.requiresApproval) {
+    add('assistant', r.text || 'Aprovação necessária.');
+    await handleApprovalResult(r);
+    return;
+  }
   const msg = r.ok ? `Comando enviado para ${target}: ${r.text || 'aceito.'}` : `Falha ao enviar para ${target}: ${r.text || 'sem detalhes'}`;
   add('assistant', msg);
   speak(msg);

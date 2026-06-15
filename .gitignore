@@ -9,6 +9,7 @@ runtime/tmp/
 system/JARVIS-HISTORY.json
 system/JARVIS-MEMORY.md
 system/JARVIS-REMINDERS.json
+system/JARVIS-APPROVALS.json
 
 # Node / OS noise
 node_modules/

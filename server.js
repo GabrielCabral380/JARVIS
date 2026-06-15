@@ -16,6 +16,7 @@ const MEMORY_FILE = path.join(SYSTEM_DIR, 'JARVIS-MEMORY.md');
 const HISTORY_FILE = path.join(SYSTEM_DIR, 'JARVIS-HISTORY.json');
 const EVENTS_FILE = path.join(LOG_DIR, 'events.ndjson');
 const REMINDERS_FILE = path.join(SYSTEM_DIR, 'JARVIS-REMINDERS.json');
+const APPROVALS_FILE = path.join(SYSTEM_DIR, 'JARVIS-APPROVALS.json');
 const BACKEND_DIR = path.join(__dirname, 'backend');
 const startedAt = new Date();
 const sseClients = new Set();
@@ -24,6 +25,7 @@ for (const dir of [SYSTEM_DIR, RUNTIME_DIR, LOG_DIR]) fs.mkdirSync(dir, { recurs
 if (!fs.existsSync(MEMORY_FILE)) fs.writeFileSync(MEMORY_FILE, '# JARVIS Memory\n\n', 'utf8');
 if (!fs.existsSync(HISTORY_FILE)) fs.writeFileSync(HISTORY_FILE, '[]', 'utf8');
 if (!fs.existsSync(REMINDERS_FILE)) fs.writeFileSync(REMINDERS_FILE, '[]', 'utf8');
+if (!fs.existsSync(APPROVALS_FILE)) fs.writeFileSync(APPROVALS_FILE, JSON.stringify({ trusted: [], pending: [] }, null, 2), 'utf8');
 
 const env = { ...process.env, ...readEnvFile() };
 
@@ -88,7 +90,8 @@ const CONFIG_KEYS = [
   'MCP_URL',
   'MCP_COMMAND',
   'LOCAL_TOOLS_ENABLED',
-  'LOCAL_TOOLS_REQUIRE_CONFIRMATION'
+  'LOCAL_TOOLS_REQUIRE_CONFIRMATION',
+  'APPROVAL_POLICY'
 ];
 
 function publicConfig() {
@@ -116,7 +119,8 @@ function publicConfig() {
     MCP_URL: env.MCP_URL || '',
     MCP_COMMAND: env.MCP_COMMAND || '',
     LOCAL_TOOLS_ENABLED: String(env.LOCAL_TOOLS_ENABLED || 'true').toLowerCase() === 'true',
-    LOCAL_TOOLS_REQUIRE_CONFIRMATION: String(env.LOCAL_TOOLS_REQUIRE_CONFIRMATION || 'false').toLowerCase() === 'true'
+    LOCAL_TOOLS_REQUIRE_CONFIRMATION: String(env.LOCAL_TOOLS_REQUIRE_CONFIRMATION || 'false').toLowerCase() === 'true',
+    APPROVAL_POLICY: String(env.APPROVAL_POLICY || 'once').toLowerCase()
   };
 }
 
@@ -192,6 +196,142 @@ function sendJson(res, status, obj) {
   const text = JSON.stringify(obj, null, 2);
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
   res.end(text);
+}
+
+
+function loadApprovalStore() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(APPROVALS_FILE, 'utf8'));
+    const trusted = Array.isArray(parsed?.trusted) ? parsed.trusted.map(String) : [];
+    const pending = Array.isArray(parsed?.pending) ? parsed.pending : [];
+    return { trusted, pending };
+  } catch {
+    return { trusted: [], pending: [] };
+  }
+}
+
+function saveApprovalStore(store) {
+  const trusted = Array.from(new Set((store?.trusted || []).map(String))).sort();
+  const pending = Array.isArray(store?.pending) ? store.pending.slice(-50) : [];
+  fs.writeFileSync(APPROVALS_FILE, JSON.stringify({ trusted, pending }, null, 2), 'utf8');
+  return { trusted, pending };
+}
+
+function approvalPolicy() {
+  const policy = String(env.APPROVAL_POLICY || 'once').toLowerCase();
+  return ['off', 'always', 'once'].includes(policy) ? policy : 'once';
+}
+
+function describeApprovalScope(kind, payload = {}) {
+  if (kind === 'local-tool') {
+    const action = String(payload.action || '').toLowerCase();
+    if (action === 'open_app') return `abrir aplicativo ${String(payload.app || '').toLowerCase() || 'local'}`;
+    if (action === 'search_web') return 'pesquisar na internet';
+    if (action === 'youtube_search') return 'pesquisar no YouTube';
+    if (action === 'open_browser') return 'abrir navegador';
+    if (action === 'open_url') {
+      try { return `abrir ${new URL(String(payload.url || '')).hostname}`; }
+      catch { return 'abrir link externo'; }
+    }
+    return `executar ação local ${action || 'desconhecida'}`;
+  }
+  if (kind === 'orchestrator') {
+    const target = String(payload.target || '').toLowerCase();
+    if (target === 'mcp') return `executar ferramenta MCP ${String(payload.tool || payload.command || '').trim() || 'sem nome'}`;
+    return `enviar comando para ${target || 'orquestrador'}`;
+  }
+  return 'executar ação sensível';
+}
+
+function approvalScope(kind, payload = {}) {
+  if (kind === 'local-tool') {
+    const action = String(payload.action || '').toLowerCase();
+    if (action === 'open_app') return `local-tool:open_app:${String(payload.app || '').toLowerCase() || 'generic'}`;
+    if (action === 'open_url') {
+      try { return `local-tool:open_url:${new URL(String(payload.url || '')).hostname.toLowerCase()}`; }
+      catch { return 'local-tool:open_url:generic'; }
+    }
+    return `local-tool:${action || 'unknown'}`;
+  }
+  if (kind === 'orchestrator') {
+    const target = String(payload.target || '').toLowerCase();
+    if (target === 'mcp') return `orchestrator:mcp:${String(payload.tool || payload.command || 'generic').toLowerCase()}`;
+    return `orchestrator:${target || 'unknown'}`;
+  }
+  return `${kind}:generic`;
+}
+
+function createApprovalRequest(kind, payload = {}) {
+  const store = loadApprovalStore();
+  const scope = approvalScope(kind, payload);
+  const policy = approvalPolicy();
+  if (policy === 'off') return null;
+  if (policy === 'once' && store.trusted.includes(scope)) return null;
+  const existing = store.pending.find(item => item.scope === scope);
+  if (existing) return existing;
+  const approval = {
+    token: `apr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`,
+    kind,
+    scope,
+    payload,
+    createdAt: new Date().toISOString(),
+    message: `Aprovação necessária para ${describeApprovalScope(kind, payload)}.`,
+    label: describeApprovalScope(kind, payload)
+  };
+  store.pending.push(approval);
+  saveApprovalStore(store);
+  log('approval.pending', { kind, scope });
+  return approval;
+}
+
+function consumeApproval(token, { trust = true } = {}) {
+  const store = loadApprovalStore();
+  const index = store.pending.findIndex(item => item.token === token);
+  if (index < 0) return null;
+  const approval = store.pending.splice(index, 1)[0];
+  if (trust && approvalPolicy() !== 'off') store.trusted.push(approval.scope);
+  saveApprovalStore(store);
+  log('approval.approved', { kind: approval.kind, scope: approval.scope, trust });
+  return approval;
+}
+
+function currentApprovals() {
+  const store = loadApprovalStore();
+  return {
+    policy: approvalPolicy(),
+    trusted: store.trusted,
+    pending: store.pending.map(item => ({
+      token: item.token,
+      kind: item.kind,
+      scope: item.scope,
+      createdAt: item.createdAt,
+      message: item.message,
+      label: item.label
+    }))
+  };
+}
+
+function approvalResponse(approval) {
+  return {
+    ok: false,
+    requiresApproval: true,
+    action: approval?.payload?.action,
+    target: approval?.payload?.target,
+    text: approval?.message || 'Aprovação necessária.',
+    approval: approval ? {
+      token: approval.token,
+      kind: approval.kind,
+      scope: approval.scope,
+      createdAt: approval.createdAt,
+      message: approval.message,
+      label: approval.label
+    } : null
+  };
+}
+
+function ensureApproved(kind, payload = {}) {
+  const approval = createApprovalRequest(kind, payload);
+  return approval ? approvalResponse(approval) : null;
 }
 
 function loadHistory() {
@@ -550,9 +690,15 @@ function localOpinion(topic = '') {
   return `Minha opinião sobre ${t}: eu analisaria com calma, separando o que é útil agora do que é apenas complexo. Se o objetivo é resultado, eu começaria por uma versão simples, testável e reversível; depois aumentaria a autonomia com segurança.`;
 }
 
-async function runLocalSkill(skill = {}) {
+async function runLocalSkill(skill = {}, options = {}) {
   if (String(env.LOCAL_TOOLS_ENABLED || 'true').toLowerCase() !== 'true') {
     return { ok: false, text: 'Ferramentas locais estão desabilitadas em Config.', action: skill.action };
+  }
+  const bypassApproval = options && options.skipApproval === true;
+  const sensitiveLocalActions = ['open_url', 'youtube_search', 'search_web', 'open_browser', 'open_app'];
+  if (!bypassApproval && sensitiveLocalActions.includes(String(skill.action || '').toLowerCase())) {
+    const gated = ensureApproved('local-tool', skill);
+    if (gated) return gated;
   }
   if (skill.action === 'learn') {
     const value = String(skill.text || '').trim();
@@ -887,11 +1033,15 @@ async function callMcpTool(tool, args = {}) {
   }
 }
 
-async function orchestratorCommand(body = {}) {
+async function orchestratorCommand(body = {}, options = {}) {
   const target = String(body.target || '').toLowerCase();
   const command = String(body.command || '').trim();
   const tool = String(body.tool || '').trim();
   const args = body.args && typeof body.args === 'object' ? body.args : {};
+  if (!options.skipApproval && ['hermes', 'openclaw', 'mcp'].includes(target)) {
+    const gated = ensureApproved('orchestrator', { target, command, tool, args });
+    if (gated) return gated;
+  }
   if (target === 'hermes') return sendToHermes(command);
   if (target === 'openclaw') return sendToOpenClaw(command);
   if (target === 'mcp') return callMcpTool(tool || command, args);
@@ -1061,7 +1211,8 @@ async function handleChat(message) {
     confidence: provider === 'local' ? 0.62 : 0.86,
     mode: agent,
     voice: { enabled: true, provider: 'browser', speed: 1.0, bargeIn: true },
-    safety: { allowed: true, reason: 'Resposta sem ação sensível.', requiresUserApproval: false },
+    safety: { allowed: true, reason: text && /Aprovação necessária/i.test(text) ? 'Ação aguardando aprovação.' : 'Resposta sem ação sensível.', requiresUserApproval: Boolean(text && /Aprovação necessária/i.test(text)) },
+    requiresApproval: Boolean(text && /Aprovação necessária/i.test(text)),
     provider
   };
 
@@ -1107,6 +1258,7 @@ async function statusPayload() {
     codex,
     orchestrator,
     localTools: { enabled: String(env.LOCAL_TOOLS_ENABLED || 'true').toLowerCase() === 'true', pythonBridge: Boolean(pythonLauncherArgs()) },
+    approvals: currentApprovals(),
     voice: 'browser SpeechRecognition + speechSynthesis',
     memory: {
       freeGb: Math.round(os.freemem() / 1024 / 1024 / 1024),
@@ -1157,6 +1309,20 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && pathname === '/api/orchestrator') return sendJson(res, 200, await orchestratorStatus());
+
+    if (req.method === 'GET' && pathname === '/api/approvals') return sendJson(res, 200, { ok: true, approvals: currentApprovals() });
+
+    if (req.method === 'POST' && pathname === '/api/approvals/approve') {
+      const body = await readJsonBody(req);
+      const approval = consumeApproval(String(body.token || '').trim(), { trust: true });
+      if (!approval) return sendJson(res, 404, { ok: false, text: 'Solicitação de aprovação não encontrada ou já consumida.' });
+      let result = { ok: true, text: `Ação aprovada: ${approval.label}.`, approval: { scope: approval.scope, kind: approval.kind } };
+      if (body.execute !== false) {
+        if (approval.kind === 'local-tool') result = await runLocalSkill(approval.payload || {}, { skipApproval: true });
+        else if (approval.kind === 'orchestrator') result = await orchestratorCommand(approval.payload || {}, { skipApproval: true });
+      }
+      return sendJson(res, result.ok ? 200 : 400, { ...result, approval: { token: approval.token, scope: approval.scope, kind: approval.kind, trusted: true } });
+    }
 
     if (req.method === 'POST' && pathname === '/api/orchestrator/command') {
       const body = await readJsonBody(req);
