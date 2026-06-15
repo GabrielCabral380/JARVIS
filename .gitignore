@@ -1,0 +1,17 @@
+# Secrets and local config
+.env
+.env.*
+!.env.example
+
+# Runtime / logs / state
+logs/
+runtime/tmp/
+system/JARVIS-HISTORY.json
+system/JARVIS-MEMORY.md
+system/JARVIS-REMINDERS.json
+
+# Node / OS noise
+node_modules/
+.DS_Store
+Thumbs.db
+*.log

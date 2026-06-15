@@ -1,0 +1,14 @@
+{
+  "name": "companion",
+  "description": "Persona central: conversa natural, presen\u00e7a calma e respostas de voz curtas.",
+  "commands": [
+    "chat",
+    "voice"
+  ],
+  "permissions": [
+    "chat",
+    "voice"
+  ],
+  "risk": "low",
+  "enabled": true
+}

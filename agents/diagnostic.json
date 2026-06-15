@@ -1,0 +1,14 @@
+{
+  "name": "diagnostic",
+  "description": "Verifica status do backend, voz, mem\u00f3ria, agentes e ambiente local.",
+  "commands": [
+    "status",
+    "logs"
+  ],
+  "permissions": [
+    "status",
+    "logs"
+  ],
+  "risk": "low",
+  "enabled": true
+}

@@ -1,0 +1,12 @@
+{
+  "name": "automation",
+  "description": "Camada de automa\u00e7\u00e3o segura. Bloqueia comandos destrutivos e exige confirma\u00e7\u00e3o para risco alto.",
+  "commands": [
+    "safe_command_check"
+  ],
+  "permissions": [
+    "safe_command_check"
+  ],
+  "risk": "medium",
+  "enabled": true
+}

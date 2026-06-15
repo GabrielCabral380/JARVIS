@@ -1,0 +1,19 @@
+{
+  "name": "jarvis-local-hub",
+  "version": "1.0.9",
+  "description": "Local JARVIS orchestrator with voice-first commands, OpenRouter/OpenAI, Codex, Hermes, OpenClaw, MCP, offline Node/Python local tools and automatic port fallback.",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "jarvis": "node server.js",
+    "test": "node --test tests/*.test.js",
+    "doctor": "node scripts/doctor.mjs",
+    "update": "node scripts/update.mjs"
+  },
+  "dependencies": {},
+  "devDependencies": {},
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "memory",
+  "description": "Salva mem\u00f3ria local e notas opcionais no Obsidian.",
+  "commands": [
+    "memory",
+    "obsidian"
+  ],
+  "permissions": [
+    "memory",
+    "obsidian"
+  ],
+  "risk": "low",
+  "enabled": true
+}

@@ -1,0 +1,14 @@
+{
+  "name": "developer",
+  "description": "Ajuda com c\u00f3digo, estrutura, testes, manuten\u00e7\u00e3o e documenta\u00e7\u00e3o.",
+  "commands": [
+    "files",
+    "tests"
+  ],
+  "permissions": [
+    "files",
+    "tests"
+  ],
+  "risk": "medium",
+  "enabled": true
+}
