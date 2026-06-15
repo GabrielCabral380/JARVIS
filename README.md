@@ -7,6 +7,12 @@
 2. Depois rode `Ligar JARVIS.bat`
 3. Se `.env` não existir, ele será criado a partir de `.env.example`
 
+## Deploy web no Render
+- O repositório já inclui `render.yaml`
+- Assim que o branch `main` for enviado ao GitHub e conectado ao Render, a URL pública nasce no padrão do serviço criado lá
+- Health check: `/api/status`
+- Política padrão de segurança no cloud: `APPROVAL_POLICY=once`
+
 ## O que vai para o GitHub
 - código-fonte
 - launchers `.bat`

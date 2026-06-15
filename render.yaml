@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: jarvis-cloud
+    runtime: node
+    plan: free
+    autoDeploy: true
+    rootDir: .
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/status
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: AI_PROVIDER
+        value: local
+      - key: AUTO_OPEN_BROWSER
+        value: false
+      - key: APPROVAL_POLICY
+        value: once
+      - key: LOCAL_TOOLS_ENABLED
+        value: true
+      - key: LOCAL_TOOLS_REQUIRE_CONFIRMATION
+        value: false
