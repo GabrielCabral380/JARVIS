@@ -14,6 +14,155 @@ let conversationContext = []; // contexto da conversa atual
 let lastQuestion = null; // última pergunta feita pelo JARVIS
 let userName = localStorage.getItem('jarvis-username') || '';
 
+// ── ALARMS & TIMERS ──
+let alarms = Store.get('alarms', []);
+let activeAlarmTimeout = null;
+let activeAlarmInterval = null;
+let alarmAudio = null;
+
+function saveAlarms() { Store.set('alarms', alarms); }
+
+function addAlarm(timeStr, label) {
+  // timeStr format: "HH:MM" or "HH:MM AM/PM"
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const alarm = { id, time: timeStr, label: label || 'Alarme', active: true, created: new Date().toISOString() };
+  alarms.push(alarm);
+  saveAlarms();
+  scheduleAlarm(alarm);
+  return alarm;
+}
+
+function addTimer(minutes, label) {
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const when = new Date(Date.now() + minutes * 60000);
+  const alarm = { id, time: when.toTimeString().slice(0, 5), label: label || 'Timer', active: true, created: new Date().toISOString(), isTimer: true, triggerAt: when.getTime() };
+  alarms.push(alarm);
+  saveAlarms();
+  scheduleAlarm(alarm);
+  return alarm;
+}
+
+function removeAlarm(id) {
+  alarms = alarms.filter(a => a.id !== id);
+  saveAlarms();
+}
+
+function listAlarms() { return alarms.filter(a => a.active); }
+
+function scheduleAlarm(alarm) {
+  const now = new Date();
+  let triggerTime;
+
+  if (alarm.triggerAt) {
+    triggerTime = alarm.triggerAt;
+  } else {
+    const [h, m] = alarm.time.split(':').map(Number);
+    triggerTime = new Date();
+    triggerTime.setHours(h, m, 0, 0);
+    if (triggerTime.getTime() <= now.getTime()) triggerTime.setDate(triggerTime.getDate() + 1);
+  }
+
+  const delay = triggerTime.getTime() - now.getTime();
+  if (delay <= 0) return;
+
+  setTimeout(() => {
+    if (alarm.active !== false) triggerAlarm(alarm);
+  }, delay);
+}
+
+function triggerAlarm(alarm) {
+  // 1) Tenta notificação do navegador
+  if ('Notification' in window && Notification.permission === 'granted') {
+    new Notification('⏰ ' + alarm.label, { body: 'Clique para parar', requireInteraction: true });
+  }
+
+  // 2) Toca áudio alto — Ironman do YouTube
+  playAlarmAudio();
+
+  // 3) Mostra modal de alarme na página
+  showAlarmModal(alarm);
+
+  // 4) Fala 3 vezes
+  let count = 0;
+  const speakInterval = setInterval(() => {
+    count++;
+    if (count <= 3) {
+      speak('⏰ ' + alarm.label + '! Hora de acordar! Clique em OK para parar.');
+    } else {
+      clearInterval(speakInterval);
+    }
+  }, 5000);
+  activeAlarmInterval = speakInterval;
+
+  // Marca timer como inativo
+  if (alarm.isTimer) {
+    alarm.active = false;
+    saveAlarms();
+  }
+}
+
+function playAlarmAudio() {
+  // Toca Ironman theme do YouTube em iframe oculto
+  if (alarmAudio) {
+    try { alarmAudio.remove(); } catch {}
+  }
+  const iframe = document.createElement('iframe');
+  iframe.id = 'alarm-audio-frame';
+  iframe.style.display = 'none';
+  // Ironman theme — vídeo curto e alto
+  iframe.src = 'https://www.youtube.com/embed/tgj48IWkXBg?autoplay=1&loop=1&playlist=tgj48IWkXBg';
+  iframe.allow = 'autoplay';
+  document.body.appendChild(iframe);
+  alarmAudio = iframe;
+}
+
+function stopAlarmAudio() {
+  if (alarmAudio) {
+    try { alarmAudio.remove(); } catch {}
+    alarmAudio = null;
+  }
+  if (activeAlarmInterval) {
+    clearInterval(activeAlarmInterval);
+    activeAlarmInterval = null;
+  }
+  stopSpeaking();
+}
+
+function showAlarmModal(alarm) {
+  // Remove modal anterior se existir
+  const old = $('#alarmModal');
+  if (old) old.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'alarmModal';
+  modal.className = 'alarm-modal-overlay';
+  modal.innerHTML = `
+    <div class="alarm-modal">
+      <div class="alarm-icon">⏰</div>
+      <div class="alarm-title">${alarm.label}</div>
+      <div class="alarm-time">${new Date().toLocaleTimeString('pt-BR')}</div>
+      <div class="alarm-msg">Hora de acordar, Senhor!</div>
+      <button id="alarmStopBtn" class="alarm-stop-btn">✅ OK — Parar Alarme</button>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  $('#alarmStopBtn')?.addEventListener('click', () => {
+    stopAlarmAudio();
+    modal.remove();
+  });
+}
+
+// Pede permissão de notificação ao iniciar
+if ('Notification' in window && Notification.permission === 'default') {
+  Notification.requestPermission();
+}
+
+// Reagenda alarmes ao carregar
+function rescheduleAlarms() {
+  alarms.forEach(a => { if (a.active) scheduleAlarm(a); });
+}
+
 // ── STORAGE ──
 const Store = {
   get(k, d) { try { return JSON.parse(localStorage.getItem('jarvis-' + k)) ?? d; } catch { return d; } },
@@ -535,6 +684,63 @@ function localReply(cmd) {
   // ── CALCULADORA ──
   if (text.includes('calculadora') || text.includes('calcul') || text.includes('calcular')) { window.open('ms-calculator:', '_blank'); return 'Abrindo calculadora.'; }
 
+  // ══════════════════════════════════════════════════════
+  // ALARMES & TIMERS
+  // ══════════════════════════════════════════════════════
+
+  // Me acorde [hora] da [manhã/tarde/noite]
+  const alarmMatch = cmd.match(/(?:me\s+)?acorde\s+(?:às\s+|as\s+)?(\d{1,2})[:\s](\d{2})?\s*(?:da\s+)?(manh[ãa]|tarde|noite|madrugada)?/i) ||
+                      cmd.match(/(?:me\s+)?acorde\s+(?:às\s+|as\s+)?(\d{1,2})\s*(?:da\s+)?(manh[ãa]|tarde|noite|madrugada)/i);
+  if (alarmMatch) {
+    let hour = parseInt(alarmMatch[1]);
+    const min = alarmMatch[2] ? parseInt(alarmMatch[2]) : 0;
+    const period = alarmMatch[3] ? alarmMatch[3].toLowerCase() : null;
+
+    if (period) {
+      if ((period.includes('tarde') || period.includes('noite')) && hour < 12) hour += 12;
+      if (period.includes('madrugada') && hour >= 6) hour += 12;
+      if (period.includes('manh') && hour === 12) hour = 0;
+    }
+
+    const timeStr = String(hour).padStart(2, '0') + ':' + String(min).padStart(2, '0');
+    const label = 'Alarme ' + timeStr + (period ? ' da ' + period : '');
+    addAlarm(timeStr, label);
+    return '⏰ Alarme definido para ' + timeStr + (period ? ' da ' + period : '') + '. Vou tocar Ironman para acordar!';
+  }
+
+  // Timer: "me acorde em X minutos/horas"
+  const timerMatch = cmd.match(/(?:me\s+)?acorde\s+em\s+(\d+)\s*(?:min|minutos?|h|horas?)/i) ||
+                      cmd.match(/(?:timer|cronômetro|cronometro|contar)\s+(?:de\s+)?(\d+)\s*(?:min|minutos?|h|horas?)/i);
+  if (timerMatch) {
+    const amount = parseInt(timerMatch[1]);
+    const isHours = text.includes('hora') || text.includes('h');
+    const minutes = isHours ? amount * 60 : amount;
+    const label = 'Timer ' + amount + (isHours ? 'h' : 'min');
+    addTimer(minutes, label);
+    return '⏱️ Timer de ' + amount + (isHours ? ' hora(s)' : ' minuto(s)') + ' iniciado. Vou te avisar!';
+  }
+
+  // Listar alarmes
+  if ((text.includes('alarme') || text.includes('timer')) && (text.includes('listar') || text.includes('mostrar') || text.includes('quais') || text.includes('ver'))) {
+    const a = listAlarms();
+    if (!a.length) return 'Nenhum alarme ativo.';
+    return 'Alarmes:\n' + a.map(x => '• ' + x.time + ' — ' + x.label + (x.isTimer ? ' (timer)' : '')).join('\n');
+  }
+
+  // Cancelar alarmes
+  if ((text.includes('alarme') || text.includes('timer')) && (text.includes('cancelar') || text.includes('apagar') || text.includes('remover') || text.includes('parar'))) {
+    const a = listAlarms();
+    if (!a.length) return 'Nenhum alarme para cancelar.';
+    a.forEach(x => removeAlarm(x.id));
+    return 'Todos os alarmes foram cancelados.';
+  }
+
+  // Parar alarme tocando agora
+  if (text.includes('parar alarme') || text.includes('desligar alarme') || text.includes('parar música') || text.includes('parar audio') || text.includes('parar som')) {
+    stopAlarmAudio();
+    return 'Alarme parado.';
+  }
+
   // ── LEMBRETES ──
   if (text.includes('lembre') || text.includes('lembrar') || text.includes('lembret')) {
     if (text.includes('listar') || text.includes('mostrar') || text.includes('quais') || text.includes('ver')) {
@@ -751,18 +957,57 @@ function renderApp() {
   $('#openChatGPTCode')?.addEventListener('click', () => { const q = prompt('O que o programa deve fazer?'); if (q) { window.open('https://chat.openai.com/?model=auto', '_blank'); addMessage('<b>JARVIS:</b> 💻 ChatGPT aberto. Cole: "Escreva um programa que ' + q + '"', 'assistant'); speak('ChatGPT aberto. Cole o prompt de programação.'); } });
   // Orch
   updateOrch(); setInterval(updateOrch, 30000);
-  // Reminders
-  setInterval(() => { const d = dueReminders(); if (d.length) { const t = 'Lembrete: ' + d[0].text; addMessage('<b>JARVIS:</b> ⏰ ' + t, 'assistant'); speak(t); const r = loadReminders(); const it = r.find(x => x.id === d[0].id); if (it) it.done = true; saveReminders(r); } }, 30000);
+  // Reminders — fala 3 vezes com áudio alto
+  setInterval(() => {
+    const d = dueReminders();
+    if (d.length) {
+      const reminder = d[0];
+      let count = 0;
+      const reminderInterval = setInterval(() => {
+        count++;
+        if (count <= 3) {
+          const msg = '⏰ Lembrete: ' + reminder.text;
+          addMessage('<b>JARVIS:</b> ' + msg, 'assistant');
+          speak(msg + '! Atenção, ' + (userName || 'Senhor') + '!');
+        } else {
+          clearInterval(reminderInterval);
+        }
+      }, 4000);
+      // Toca som de notificação se possível
+      try {
+        if ('AudioContext' in window) {
+          const actx = new AudioContext();
+          const osc = actx.createOscillator();
+          const gain = actx.createGain();
+          osc.connect(gain);
+          gain.connect(actx.destination);
+          osc.frequency.value = 880;
+          gain.gain.value = 0.3;
+          osc.start();
+          setTimeout(() => { osc.stop(); actx.close(); }, 600);
+        }
+      } catch {}
+      // Marca como feito após 3 avisos
+      setTimeout(() => {
+        const r = loadReminders();
+        const it = r.find(x => x.id === reminder.id);
+        if (it) { it.done = true; saveReminders(r); }
+      }, 15000);
+    }
+  }, 15000); // Verifica a cada 15 segundos
+
   // Mem status
-  setInterval(() => { const e = $('#memStatus'); if (e) e.textContent = loadMemory().length + ' entradas • ' + listReminders().length + ' lembretes'; }, 10000);
+  setInterval(() => { const e = $('#memStatus'); if (e) e.textContent = loadMemory().length + ' entradas • ' + listReminders().length + ' lembretes • ' + listAlarms().length + ' alarmes'; }, 10000);
   // Visibility change — reinicia reconhecimento quando aba volta ao foco
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && listening && recognition) {
       try { recognition.start(); } catch {}
     }
   });
+  // Reagenda alarmes ao carregar
+  rescheduleAlarms();
   // Init msg
-  addMessage('<b>JARVIS:</b> ' + greeting + ' Voz contínua, programas do PC, ChatGPT. Diga "ajuda" para comandos.', 'assistant');
+  addMessage('<b>JARVIS:</b> ' + greeting + ' Voz contínua, alarmes, lembretes com áudio, ChatGPT. Diga "ajuda" para comandos.', 'assistant');
 }
 
 // ── INIT ──

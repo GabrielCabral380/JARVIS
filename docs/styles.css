@@ -173,3 +173,70 @@ button.listening{border-color:rgba(255,80,80,.6)!important;background:rgba(255,8
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:rgba(103,231,255,.2);border-radius:3px}
 ::-webkit-scrollbar-thumb:hover{background:rgba(103,231,255,.35)}
+
+/* ══════════════════════════════════════
+   ALARM MODAL
+   ══════════════════════════════════════ */
+.alarm-modal-overlay{
+  position:fixed;inset:0;z-index:9999;
+  background:rgba(0,0,0,.85);
+  display:grid;place-items:center;
+  animation: alarmFadeIn .3s ease-out;
+}
+@keyframes alarmFadeIn{from{opacity:0}to{opacity:1}}
+.alarm-modal{
+  background:linear-gradient(135deg,rgba(10,30,50,.95),rgba(5,15,30,.98));
+  border:2px solid rgba(255,180,50,.6);
+  border-radius:24px;
+  padding:40px 50px;
+  text-align:center;
+  box-shadow:0 0 80px rgba(255,180,50,.25),0 0 160px rgba(255,100,0,.15);
+  animation: alarmPulse 1.5s ease-in-out infinite, alarmSlideUp .4s ease-out;
+  max-width:480px;width:90%;
+}
+@keyframes alarmSlideUp{from{transform:translateY(40px);opacity:0}to{transform:translateY(0);opacity:1}}
+@keyframes alarmPulse{0%,100%{box-shadow:0 0 80px rgba(255,180,50,.25),0 0 160px rgba(255,100,0,.15)}50%{box-shadow:0 0 120px rgba(255,180,50,.45),0 0 200px rgba(255,100,0,.25)}}
+.alarm-icon{font-size:64px;animation: alarmBounce .6s ease-in-out infinite}
+@keyframes alarmBounce{0%,100%{transform:scale(1)}50%{transform:scale(1.15)}}
+.alarm-title{font-size:28px;font-weight:700;color:#ffb432;text-transform:uppercase;letter-spacing:.15em;margin:12px 0 4px}
+.alarm-time{font-size:48px;font-weight:300;color:var(--cyan);font-variant-numeric:tabular-nums;text-shadow:0 0 30px rgba(103,231,255,.3)}
+.alarm-msg{font-size:16px;color:var(--muted);margin:8px 0 24px}
+.alarm-stop-btn{
+  background:linear-gradient(135deg,rgba(255,180,50,.2),rgba(255,100,0,.2))!important;
+  border:2px solid rgba(255,180,50,.6)!important;
+  color:#ffb432!important;
+  font-size:18px!important;
+  padding:16px 40px!important;
+  border-radius:16px!important;
+  cursor:pointer;
+  transition:all .2s;
+  text-transform:uppercase;
+  letter-spacing:.1em;
+  font-weight:700;
+}
+.alarm-stop-btn:hover{
+  background:linear-gradient(135deg,rgba(255,180,50,.35),rgba(255,100,0,.35))!important;
+  border-color:rgba(255,200,80,.8)!important;
+  transform:scale(1.05);
+  box-shadow:0 0 30px rgba(255,180,50,.4);
+}
+
+/* Notification toast */
+.toast{
+  position:fixed;bottom:24px;right:24px;z-index:9998;
+  background:linear-gradient(135deg,rgba(10,30,50,.95),rgba(5,15,30,.98));
+  border:1px solid var(--line);
+  border-radius:14px;
+  padding:16px 20px;
+  color:var(--text);
+  font-size:14px;
+  max-width:360px;
+  box-shadow:0 8px 30px rgba(0,0,0,.4);
+  animation: toastIn .3s ease-out;
+  display:flex;align-items:center;gap:10px;
+}
+.toast .toast-icon{font-size:24px}
+.toast .toast-text{flex:1}
+.toast .toast-close{background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;padding:0 4px}
+.toast .toast-close:hover{color:var(--text)}
+@keyframes toastIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
