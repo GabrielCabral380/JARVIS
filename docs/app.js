@@ -133,13 +133,107 @@ function localReply(cmd) {
   }
   if (text.includes('abrir navegador') || text.includes('abrir browser') || text.includes('abrir google') || text.includes('navegador')) { window.open('https://www.google.com', '_blank'); return 'Abrindo navegador.'; }
 
+  // ══════════════════════════════════════════════════════
+  // INTEGRAÇÕES — E-mail, WhatsApp, Redes Sociais, Apps
+  // ══════════════════════════════════════════════════════
+
+  // ── E-MAIL ──
+  if (text.includes('email') || text.includes('e-mail') || text.includes('correio')) {
+    const emailCmd = text.match(/(?:enviar?|escrever|compor|mandar?)\s+(?:e[-]?email|email|mensagem)\s+(?:para\s+)?(.+)/i);
+    if (emailCmd) {
+      const to = emailCmd[1].trim();
+      const subjectMatch = text.match(/assunto\s+(.+?)(?:\s+com\s+|$)/i);
+      const subject = subjectMatch ? encodeURIComponent(subjectMatch[1].trim()) : '';
+      window.open('mailto:' + to + '?subject=' + subject, '_blank');
+      return '📧 Abrindo e-mail para ' + to + '.';
+    }
+    if (text.includes('gmail')) { window.open('https://mail.google.com', '_blank'); return '📧 Abrindo Gmail.'; }
+    if (text.includes('outlook') || text.includes('hotmail')) { window.open('https://outlook.live.com', '_blank'); return '📧 Abrindo Outlook.'; }
+    if (text.includes('yahoo')) { window.open('https://mail.yahoo.com', '_blank'); return '📧 Abrindo Yahoo Mail.'; }
+    window.open('https://mail.google.com', '_blank');
+    return '📧 Abrindo Gmail.';
+  }
+  if (text === 'gmail' || text.includes('abrir gmail')) { window.open('https://mail.google.com', '_blank'); return '📧 Abrindo Gmail.'; }
+  if (text === 'outlook' || text.includes('abrir outlook') || text.includes('hotmail')) { window.open('https://outlook.live.com', '_blank'); return '📧 Abrindo Outlook.'; }
+
+  // ── WHATSAPP ──
+  if (text.includes('whatsapp') || text.includes('whats')) {
+    if (text.includes('web') || text.includes('computador') || text.includes('pc')) {
+      window.open('https://web.whatsapp.com', '_blank');
+      return '💬 Abrindo WhatsApp Web.';
+    }
+    const wMatch = text.match(/(?:whatsapp|whats)\s+(?:para\s+)?(\d[\d\s\-().+]{6,})/i);
+    if (wMatch) {
+      const num = wMatch[1].replace(/[\s\-().+]/g, '');
+      const msgMatch = text.match(/(?:dizendo|mensagem|falando|enviar?)\s+["']?(.+?)["']?\s*$/i);
+      const msg = msgMatch ? encodeURIComponent(msgMatch[1].trim()) : '';
+      window.open('https://wa.me/' + num + (msg ? '?text=' + msg : ''), '_blank');
+      return '💬 Abrindo WhatsApp para ' + wMatch[1].trim() + '.';
+    }
+    window.open('https://web.whatsapp.com', '_blank');
+    return '💬 Abrindo WhatsApp Web.';
+  }
+
+  // ── REDES SOCIAIS ──
+  if (text.includes('instagram') || text === 'insta') { window.open('https://www.instagram.com', '_blank'); return '📸 Abrindo Instagram.'; }
+  if (text.includes('twitter') || text === 'x.com' || text === 'x') { window.open('https://x.com', '_blank'); return '🐦 Abrindo X (Twitter).'; }
+  if (text.includes('facebook') || text === 'face') { window.open('https://www.facebook.com', '_blank'); return '📘 Abrindo Facebook.'; }
+  if (text.includes('linkedin')) { window.open('https://www.linkedin.com', '_blank'); return '💼 Abrindo LinkedIn.'; }
+  if (text.includes('tiktok') || text === 'tik tok') { window.open('https://www.tiktok.com', '_blank'); return '🎵 Abrindo TikTok.'; }
+  if (text.includes('telegram')) { window.open('https://web.telegram.org', '_blank'); return '✈️ Abrindo Telegram Web.'; }
+  if (text.includes('discord')) { window.open('https://discord.com/app', '_blank'); return '🎮 Abrindo Discord.'; }
+  if (text.includes('slack')) { window.open('https://app.slack.com', '_blank'); return '💬 Abrindo Slack.'; }
+  if (text.includes('teams') || text.includes('microsoft teams')) { window.open('https://teams.microsoft.com', '_blank'); return '👥 Abrindo Microsoft Teams.'; }
+  if (text.includes('zoom')) { window.open('https://zoom.us/join', '_blank'); return '📹 Abrindo Zoom.'; }
+  if (text.includes('meet') || text.includes('google meet')) { window.open('https://meet.google.com', '_blank'); return '📹 Abrindo Google Meet.'; }
+
+  // ── STREAMING ──
+  if (text.includes('netflix')) { window.open('https://www.netflix.com', '_blank'); return '🎬 Abrindo Netflix.'; }
+  if (text.includes('spotify')) { window.open('https://open.spotify.com', '_blank'); return '🎵 Abrindo Spotify.'; }
+  if (text.includes('disney') || text.includes('disney+')) { window.open('https://www.disneyplus.com', '_blank'); return '✨ Abrindo Disney+.'; }
+  if (text.includes('hbo') || text.includes('max')) { window.open('https://www.max.com', '_blank'); return '🎬 Abrindo HBO Max.'; }
+
+  // ── TRABALHO / PRODUTIVIDADE ──
+  if (text.includes('google drive') || text.includes('drive')) { window.open('https://drive.google.com', '_blank'); return '📁 Abrindo Google Drive.'; }
+  if (text.includes('google docs') || text.includes('docs')) { window.open('https://docs.google.com', '_blank'); return '📄 Abrindo Google Docs.'; }
+  if (text.includes('google sheets') || text.includes('planilha')) { window.open('https://sheets.google.com', '_blank'); return '📊 Abrindo Google Sheets.'; }
+  if (text.includes('google calendar') || text.includes('calendário') || text.includes('calendario') || text.includes('agenda')) { window.open('https://calendar.google.com', '_blank'); return '📅 Abrindo Google Calendar.'; }
+  if (text.includes('notion')) { window.open('https://www.notion.so', '_blank'); return '📝 Abrindo Notion.'; }
+  if (text.includes('trello')) { window.open('https://trello.com', '_blank'); return '📋 Abrindo Trello.'; }
+  if (text.includes('github')) { window.open('https://github.com', '_blank'); return '💻 Abrindo GitHub.'; }
+  if (text.includes('figma')) { window.open('https://www.figma.com', '_blank'); return '🎨 Abrindo Figma.'; }
+  if (text.includes('canva')) { window.open('https://www.canva.com', '_blank'); return '🎨 Abrindo Canva.'; }
+
+  // ── COMPRAS / FINANCEIRO ──
+  if (text.includes('amazon')) { window.open('https://www.amazon.com.br', '_blank'); return '🛒 Abrindo Amazon.'; }
+  if (text.includes('mercado livre') || text.includes('mercadolibre')) { window.open('https://www.mercadolivre.com.br', '_blank'); return '🛒 Abrindo Mercado Livre.'; }
+  if (text.includes('olx')) { window.open('https://www.olx.com.br', '_blank'); return '🛒 Abrindo OLX.'; }
+  if (text.includes('shopee')) { window.open('https://shopee.com.br', '_blank'); return '🛒 Abrindo Shopee.'; }
+  if (text.includes('nubank') || text.includes('banco')) { window.open('https://app.nubank.com.br', '_blank'); return '🏦 Abrindo Nubank.'; }
+  if (text.includes('ifood')) { window.open('https://www.ifood.com.br', '_blank'); return '🍕 Abrindo iFood.'; }
+
+  // ── NOTÍCIAS ──
+  if (text.includes('notícia') || text.includes('noticia') || text.includes('jornal')) { window.open('https://news.google.com', '_blank'); return '📰 Abrindo Google Notícias.'; }
+  if (text.includes('g1') || text.includes('globo')) { window.open('https://g1.globo.com', '_blank'); return '📰 Abrindo G1.'; }
+  if (text.includes('uol')) { window.open('https://www.uol.com.br', '_blank'); return '📰 Abrindo UOL.'; }
+  if (text.includes('cnn')) { window.open('https://www.cnnbrasil.com.br', '_blank'); return '📰 Abrindo CNN Brasil.'; }
+
+  // ── MAPAS / TRANSPORTE ──
+  if (text.includes('google maps') || text.includes('mapa')) { window.open('https://maps.google.com', '_blank'); return '🗺️ Abrindo Google Maps.'; }
+  if (text.includes('waze')) { window.open('https://www.waze.com/live-map', '_blank'); return '🗺️ Abrindo Waze.'; }
+  if (text.includes('uber')) { window.open('https://m.uber.com', '_blank'); return '🚗 Abrindo Uber.'; }
+  if (text.includes('99') || text.includes('nove nove')) { window.open('https://99app.com', '_blank'); return '🚗 Abrindo 99.'; }
+
+  // ── Open apps locais (Windows) ──
   const oM = text.match(/(?:abrir|abre|abra)\s+(?:o|a|os|as)?\s*(.+)/i);
   if (oM && !oM[1].includes('navegador') && !oM[1].includes('browser')) {
-    const app = oM[1].trim();
-    const prot = { 'calculadora': 'ms-calculator:', 'bloco de notas': 'notepad:', 'paint': 'ms-paint:', 'explorador': 'file:///C:/', 'documentos': 'file:///C:/Users/User/Documents', 'downloads': 'file:///C:/Users/User/Downloads', 'música': 'file:///C:/Users/User/Music', 'imagens': 'file:///C:/Users/User/Pictures', 'vídeos': 'file:///C:/Users/User/Videos' };
+    const app = oM[1].trim().toLowerCase();
+    const webApps = ['gmail','outlook','yahoo','whatsapp','instagram','twitter','facebook','linkedin','telegram','discord','slack','teams','zoom','meet','netflix','spotify','disney','hbo','max','google drive','docs','sheets','calendar','notion','trello','github','figma','canva','amazon','mercado livre','olx','shopee','nubank','ifood','maps','waze','uber','99'];
+    if (webApps.some(w => app.includes(w))) return null;
+    const prot = { 'calculadora':'ms-calculator:','bloco de notas':'notepad:','notepad':'notepad:','paint':'ms-paint:','explorador':'file:///C:/','documentos':'file:///C:/Users/User/Documents','downloads':'file:///C:/Users/User/Downloads','música':'file:///C:/Users/User/Music','musica':'file:///C:/Users/User/Music','imagens':'file:///C:/Users/User/Pictures','fotos':'file:///C:/Users/User/Pictures','vídeos':'file:///C:/Users/User/Videos','videos':'file:///C:/Users/User/Videos','desktop':'file:///C:/Users/User/Desktop' };
     const p = prot[app];
-    if (p) { window.open(p, '_blank'); return 'Abrindo ' + app + '.'; }
-    if (app.length > 0) { window.open('file:///' + app, '_blank'); return 'Tentando abrir ' + app + '.'; }
+    if (p) { window.open(p, '_blank'); return '🖥️ Abrindo ' + app + '.'; }
+    return '💡 Não encontrei "' + app + '". Posso abrir: calculadora, bloco de notas, explorador, documentos, downloads, desktop. E web: Gmail, WhatsApp, Instagram, Spotify, Netflix, Drive, Calendar e mais.';
   }
 
   if (text.includes('música') || text.includes('musica') || text.includes('tocar') || text.includes('ouvir') || text.includes('quero ouvir')) {
