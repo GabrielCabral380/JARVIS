@@ -71,14 +71,26 @@ function startListening() {
     recognition = new SpeechRecognition();
     recognition.lang = loadConfig().VOICE_LANG || 'pt-BR';
     recognition.continuous = true; recognition.interimResults = false;
-    recognition.onstart = () => { listening = true; const e = $('#voiceStatus'); if (e) e.textContent = 'Ouvindo...'; setMode('LISTENING', '◉'); };
-    recognition.onend = () => { listening = false; const e = $('#voiceStatus'); if (e) e.textContent = 'Pronta.'; setMode('PAGES', '◎'); };
-    recognition.onerror = ev => { listening = false; const e = $('#voiceStatus'); if (e) e.textContent = 'Erro: ' + (ev.error || '?'); setMode('PAGES', '◎'); };
+    recognition.onstart = () => { listening = true; const e = $('#voiceStatus'); if (e) e.textContent = '🎙️ Ouvindo...'; setMode('LISTENING', '◉'); };
+    recognition.onend = () => {
+      if (listening) { try { recognition.start(); } catch {} return; }
+      const e = $('#voiceStatus'); if (e) e.textContent = 'Pronta.'; setMode('PAGES', '◎');
+    };
+    recognition.onerror = ev => {
+      if (ev.error === 'no-speech' || ev.error === 'aborted') { if (listening) { try { recognition.start(); } catch {} } return; }
+      if (listening) { try { recognition.start(); } catch {} return; }
+      listening = false; const e = $('#voiceStatus'); if (e) e.textContent = 'Erro: ' + (ev.error || '?'); setMode('PAGES', '◎');
+    };
     recognition.onresult = ev => { const t = ev.results[ev.results.length - 1][0].transcript || ''; if (ev.results[ev.results.length - 1].isFinal) { const ci = $('#commandInput'); if (ci) ci.value = t; runCommand(t, true); } };
   }
   try { recognition.start(); } catch {}
 }
-function stopListening() { if (recognition) { try { recognition.stop(); } catch {} } listening = false; }
+function stopListening() {
+  listening = false;
+  if (recognition) { try { recognition.stop(); } catch {} }
+  const e = $('#voiceStatus'); if (e) e.textContent = '⏹️ Parada.';
+  setMode('PAGES', '◎');
+}
 
 // ── UI ──
 function setMode(mode, mood) { const m = $('#mode'); const o = $('#mood'); if (m) m.textContent = mode; if (o) o.textContent = mood || '◎'; }
@@ -419,8 +431,8 @@ function renderApp() {
   $('#commandInput')?.addEventListener('keydown', e => { if (e.key === 'Enter') { const i = $('#commandInput'); if (i) { runCommand(i.value.trim()); i.value = ''; } } });
   // Voice
   $('#testVoice')?.addEventListener('click', () => { addMessage('<b>Você:</b> testar voz', 'user'); const r = 'Voz online.'; addMessage('<b>JARVIS:</b> ' + r, 'assistant'); speak(r); });
-  $('#startVoice')?.addEventListener('click', () => { startListening(); const s = $('#startVoice'); const p = $('#stopVoice'); if (s) s.style.display = 'none'; if (p) p.style.display = ''; });
-  $('#stopVoice')?.addEventListener('click', () => { stopListening(); stopSpeaking(); const s = $('#startVoice'); const p = $('#stopVoice'); if (s) s.style.display = ''; if (p) p.style.display = 'none'; });
+  $('#startVoice')?.addEventListener('click', () => { startListening(); const s = $('#startVoice'); const p = $('#stopVoice'); if (s) { s.style.display = 'none'; } if (p) { p.style.display = ''; p.classList.add('listening'); } });
+  $('#stopVoice')?.addEventListener('click', () => { stopListening(); stopSpeaking(); const s = $('#startVoice'); const p = $('#stopVoice'); if (s) s.style.display = ''; if (p) { p.style.display = 'none'; p.classList.remove('listening'); } });
   // Quick
   $('#openYouTube')?.addEventListener('click', () => { addMessage('<b>Você:</b> Abrir YouTube', 'user'); window.open('https://www.youtube.com', '_blank'); const r = 'Abrindo YouTube.'; addMessage('<b>JARVIS:</b> ' + r, 'assistant'); speak(r); });
   $('#openBrowser')?.addEventListener('click', () => { const q = prompt('Pesquisar:'); if (q) { addMessage('<b>Você:</b> Pesquisar: ' + q, 'user'); window.open('https://www.google.com/search?q=' + encodeURIComponent(q), '_blank'); const r = 'Pesquisando "' + q + '".'; addMessage('<b>JARVIS:</b> ' + r, 'assistant'); speak(r); } });

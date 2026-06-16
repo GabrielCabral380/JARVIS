@@ -141,3 +141,7 @@ nav{display:flex;gap:10px;justify-content:center}
   .config-actions{flex-direction:column}
   .config-section input[type=range]{width:80px}
 }
+
+/* Listening button glow */
+button.listening{border-color:rgba(255,80,80,.6)!important;background:rgba(255,80,80,.12)!important;color:#ff6b6b!important;animation:listenPulse 1.5s ease-in-out infinite}
+@keyframes listenPulse{0%,100%{box-shadow:0 0 8px rgba(255,80,80,.25)}50%{box-shadow:0 0 22px rgba(255,80,80,.55)}}
