@@ -12,7 +12,13 @@ services:
       - key: NODE_VERSION
         value: 20
       - key: AI_PROVIDER
-        value: local
+        value: openrouter
+      - key: OPENROUTER_MODEL
+        value: openai/gpt-4o-mini
+      - key: OPENROUTER_SITE_URL
+        value: https://gabrielcabral380.github.io/JARVIS/
+      - key: OPENROUTER_SITE_NAME
+        value: JARVIS Cloud Access
       - key: AUTO_OPEN_BROWSER
         value: false
       - key: APPROVAL_POLICY

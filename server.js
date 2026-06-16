@@ -192,9 +192,17 @@ function readJsonBody(req) {
   });
 }
 
+function corsHeaders() {
+  return {
+    'access-control-allow-origin': '*',
+    'access-control-allow-methods': 'GET,POST,OPTIONS',
+    'access-control-allow-headers': 'content-type'
+  };
+}
+
 function sendJson(res, status, obj) {
   const text = JSON.stringify(obj, null, 2);
-  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...corsHeaders() });
   res.end(text);
 }
 
@@ -1297,6 +1305,11 @@ const server = http.createServer(async (req, res) => {
   const pathname = requestUrl.pathname || '/';
 
   try {
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, corsHeaders());
+      res.end();
+      return;
+    }
     if (req.method === 'GET' && pathname === '/api/local-tools/reminders') return sendJson(res, 200, { ok: true, reminders: listReminders() });
 
     if (req.method === 'GET' && pathname === '/api/local-tools/reminders/due') return sendJson(res, 200, { ok: true, due: dueReminders() });

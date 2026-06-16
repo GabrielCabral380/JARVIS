@@ -18,14 +18,9 @@ app.innerHTML = `
 <section class="layout">
   <aside class="panel left">
     <h3>◉ STATUS</h3>
-    <div id="status" class="orchestrator">Backend não configurado.</div>
+    <div id="status" class="orchestrator">${apiBase ? 'Backend configurado. Pronto para testar.' : 'Backend não configurado.'}</div>
     <h3>◉ VOZ</h3>
     <div id="voiceStatus" class="orchestrator">Pronta para síntese de voz.</div>
-    <h3>◉ LINKS</h3>
-    <div class="quick vertical">
-      <a class="linkbtn" href="https://github.com/GabrielCabral380/JARVIS" target="_blank" rel="noreferrer">Abrir repositório</a>
-      <a class="linkbtn" href="${apiBase || 'https://render.com/'}" target="_blank" rel="noreferrer">Abrir backend</a>
-    </div>
   </aside>
   <main class="center">
     <section class="screen tabpage active">
@@ -38,16 +33,15 @@ app.innerHTML = `
         <button id="saveApi">Salvar URL</button>
       </div>
       <div class="composer">
-        <input id="commandInput" placeholder="Diga ou digite: Jarvis, testar voz" />
+        <input id="commandInput" placeholder="Diga ou digite seu comando para o JARVIS" />
         <button id="sendCommand">Enviar</button>
       </div>
       <div class="quick">
         <button id="testStatus">Testar /api/status</button>
         <button id="testVoice">Testar voz</button>
         <button id="startVoice">Falar</button>
-        <button id="openBackend">Abrir backend</button>
       </div>
-      <p class="muted">Esta página pública já responde por voz no navegador. O backend cloud continua opcional e só é usado quando o Senhor informar uma URL válida.</p>
+      <p class="muted">Com backend configurado, o Pages envia seus comandos para <code>/api/chat</code>. Sem backend, a página continua com voz local e respostas básicas.</p>
     </section>
   </main>
   <aside class="panel right">
@@ -55,7 +49,7 @@ app.innerHTML = `
     <div class="orchestrator">
       <p><b>Pages:</b> ativo para acesso público.</p>
       <p><b>Backend atual:</b> <span id="apiLabel"></span></p>
-      <p><b>Modo:</b> voz local no navegador + teste opcional de backend.</p>
+      <p><b>Modo:</b> voz local + chat remoto quando houver backend.</p>
     </div>
   </aside>
 </section>
@@ -100,7 +94,7 @@ function speak(text) {
   window.speechSynthesis.speak(utterance);
 }
 
-function buildReply(command) {
+function localReply(command) {
   const text = (command || '').toLowerCase().trim();
   if (!text) return 'Estou ouvindo, Senhor.';
   if (text.includes('testar voz') || text.includes('fala') || text.includes('voz')) {
@@ -111,29 +105,18 @@ function buildReply(command) {
       ? `A URL configurada para backend é ${apiBase}. Posso testar o status agora.`
       : 'O backend cloud ainda não foi configurado nesta página. A voz local está ativa.';
   }
-  if (text.includes('abrir repositório')) {
-    window.open('https://github.com/GabrielCabral380/JARVIS', '_blank', 'noopener,noreferrer');
-    return 'Abrindo o repositório do JARVIS.';
-  }
-  if (text.includes('abrir backend')) {
-    if (apiBase) {
-      window.open(apiBase, '_blank', 'noopener,noreferrer');
-      return 'Abrindo a URL do backend configurado.';
-    }
-    return 'Ainda não existe uma URL de backend salva para abrir.';
-  }
   if (text.includes('testar backend') || text.includes('api status')) {
     testStatus();
     return 'Iniciando teste do backend agora.';
   }
-  return 'Comando recebido. Posso testar a voz, verificar o status do backend ou abrir o repositório.';
+  return 'Recebi seu comando. Para executar com IA completa, configure uma URL de backend válida.';
 }
 
-async function fetchWithTimeout(url, ms=12000) {
+async function fetchWithTimeout(url, options = {}, ms = 12000) {
   const ctrl = new AbortController();
   const id = setTimeout(() => ctrl.abort(), ms);
   try {
-    const res = await fetch(url, { signal: ctrl.signal });
+    const res = await fetch(url, { ...options, signal: ctrl.signal });
     const text = await res.text();
     return { ok: res.ok, status: res.status, text };
   } finally {
@@ -171,11 +154,40 @@ async function testStatus() {
   }
 }
 
-function runCommand(command, fromVoice=false) {
-  const reply = buildReply(command);
-  addMessage(command || 'Sem comando.', fromVoice ? 'user' : 'user');
-  addMessage(reply, 'assistant');
-  speak(reply);
+async function remoteChat(command) {
+  const base = $('#apiUrl').value.trim().replace(/\/$/, '');
+  const result = await fetchWithTimeout(`${base}/api/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ message: command })
+  }, 30000);
+  if (!result.ok) throw new Error(`HTTP ${result.status}`);
+  const data = JSON.parse(result.text || '{}');
+  return data.text || 'Sem resposta do backend.';
+}
+
+async function runCommand(command, fromVoice=false) {
+  const prompt = String(command || '').trim();
+  addMessage(prompt || 'Sem comando.', 'user');
+  if (!prompt) {
+    const reply = 'Estou ouvindo, Senhor.';
+    addMessage(reply, 'assistant');
+    speak(reply);
+    return;
+  }
+  setMode('THINKING', '◌');
+  try {
+    const base = $('#apiUrl').value.trim().replace(/\/$/, '');
+    const reply = base ? await remoteChat(prompt) : localReply(prompt);
+    addMessage(reply, 'assistant');
+    speak(reply);
+  } catch (err) {
+    const reply = `O backend não respondeu. ${localReply(prompt)}`;
+    addMessage(reply, 'assistant');
+    speak(reply);
+  } finally {
+    setMode(listening ? 'LISTENING' : 'PAGES', listening ? '◉' : '◎');
+  }
 }
 
 function toggleVoice() {
@@ -219,22 +231,16 @@ $('#saveApi').addEventListener('click', () => {
   location.search = base ? `?api=${encodeURIComponent(base)}` : '';
 });
 $('#testStatus').addEventListener('click', testStatus);
-$('#testVoice').addEventListener('click', () => runCommand('testar voz'));
+$('#testVoice').addEventListener('click', () => {
+  addMessage('testar voz', 'user');
+  const reply = 'Voz online. Estou respondendo diretamente do navegador, Senhor.';
+  addMessage(reply, 'assistant');
+  speak(reply);
+});
 $('#startVoice').addEventListener('click', toggleVoice);
 $('#sendCommand').addEventListener('click', () => runCommand($('#commandInput').value.trim()));
 $('#commandInput').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') runCommand($('#commandInput').value.trim());
 });
-$('#openBackend').addEventListener('click', () => {
-  const base = $('#apiUrl').value.trim().replace(/\/$/, '');
-  if (base) {
-    window.open(base, '_blank', 'noopener,noreferrer');
-    addMessage('Abrindo backend configurado.', 'assistant');
-    speak('Abrindo backend configurado.');
-  } else {
-    addMessage('Nenhum backend configurado.', 'assistant');
-    speak('Nenhum backend configurado.');
-  }
-});
 
-addMessage('Página pública do JARVIS pronta. A voz local já pode ser testada.', 'assistant');
+addMessage('Página pública do JARVIS pronta. Configure um backend para usar IA completa.', 'assistant');
