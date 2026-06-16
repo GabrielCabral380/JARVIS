@@ -1,7 +1,7 @@
 // ══════════════════════════════════════════════════════
-// JARVIS — Client-Side Full Implementation v2.0
+// JARVIS — Client-Side Full Implementation v3.0
 // Funciona 100% no GitHub Pages sem backend
-// Todas as funções do projeto original por voz
+// Diálogo natural, autonomia, interação com PC
 // ══════════════════════════════════════════════════════
 
 const $ = s => document.querySelector(s);
@@ -10,6 +10,9 @@ const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecogni
 let recognition = null;
 let listening = false;
 let safeMode = false;
+let conversationContext = []; // contexto da conversa atual
+let lastQuestion = null; // última pergunta feita pelo JARVIS
+let userName = localStorage.getItem('jarvis-username') || '';
 
 // ── STORAGE ──
 const Store = {
@@ -45,7 +48,7 @@ function listReminders() { return loadReminders().filter(r => !r.done); }
 function dueReminders() { const n = Date.now(); return loadReminders().filter(r => !r.done && r.when && new Date(r.when).getTime() <= n); }
 function parseReminder(text) {
   const t = text.toLowerCase();
-  const patterns = [/(?:me\s+)?lembre\s+(?:de\s+)?(.+?)(?:\s+em\s+(\d+)\s*(?:min|minutos?|h|horas?))?$/i, /(?:me\s+)?lembrar\s+(?:de\s+)?(.+?)(?:\s+em\s+(\d+)\s*(?:min|minutos?|h|horas?))?$/i, /(?:me\s+)?lembre\s+(?:de\s+)?(.+?)(?:\s+(?:amanh[ãa]|hoje)\s*(?:[àa]s\s+)?([0-9]{1,2}:[0-9]{2}))?$/i, /(?:me\s+)?lembre\s+(?:de\s+)?(.+?)(?:\s+(?:amanh[ãa]|[0-9]{1,2}:[0-9]{2}))?$/i];
+  const patterns = [/(?:me\s+)?lembre\s+(?:de\s+)?(.+?)(?:\s+em\s+(\d+)\s*(?:min|minutos?|h|horas?))?$/i, /(?:me\s+)?lembrar\s+(?:de\s+)?(.+?)(?:\s+em\s+(\d+)\s*(?:min|minutos?|h|horas?))?$/i, /(?:me\s+)?lembre\s+(?:de\s+)?(.+?)(?:\s+(?:amanh[ãa]|hoje)\s*(?:[àa]s\s+)?([0-9]{1,2}:[0-9]{2}))?$/i];
   for (const p of patterns) { const m = text.match(p); if (m) { const rt = m[1].trim(); let w = null; if (m[2]) { if (m[2].includes(':')) { const [hh, mm] = m[2].split(':'); const d = new Date(); d.setHours(parseInt(hh), parseInt(mm), 0, 0); if (d < Date.now()) d.setDate(d.getDate() + 1); w = d.toISOString(); } else { const n = parseInt(m[2]); w = new Date(Date.now() + n * (t.includes('hora') ? 3600000 : 60000)).toISOString(); } } else if (t.includes('amanh')) { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); w = d.toISOString(); } return { text: rt, when: w }; } }
   return null;
 }
@@ -56,12 +59,12 @@ function saveApprovals(a) { Store.set('approvals', a); }
 
 // ── VOICE ──
 function speak(text) {
-  if (!('speechSynthesis' in window)) { const e = $('#voiceStatus'); if (e) e.textContent = 'Sem suporte a voz.'; return; }
+  if (!('speechSynthesis' in window)) return;
   window.speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
   u.lang = (loadConfig().VOICE_LANG || 'pt-BR'); u.rate = parseFloat(loadConfig().VOICE_RATE) || 1; u.pitch = parseFloat(loadConfig().VOICE_PITCH) || 0.95;
-  u.onstart = () => { const e = $('#voiceStatus'); if (e) e.textContent = 'Falando...'; setMode('SPEAKING', '◉'); };
-  u.onend = () => { const e = $('#voiceStatus'); if (e) e.textContent = listening ? 'Ouvindo...' : 'Pronta.'; setMode(listening ? 'LISTENING' : 'PAGES', listening ? '◉' : '◎'); };
+  u.onstart = () => { const e = $('#voiceStatus'); if (e) e.textContent = '🔊 Falando...'; setMode('SPEAKING', '◉'); document.querySelector('.orb')?.classList.add('speaking'); document.querySelector('.orb')?.classList.remove('listening'); };
+  u.onend = () => { const e = $('#voiceStatus'); if (e) e.textContent = listening ? '🎙️ Ouvindo...' : 'Pronta.'; setMode(listening ? 'LISTENING' : 'PAGES', listening ? '◉' : '◎'); document.querySelector('.orb')?.classList.remove('speaking'); if (listening) document.querySelector('.orb')?.classList.add('listening'); };
   window.speechSynthesis.speak(u);
 }
 function stopSpeaking() { if ('speechSynthesis' in window) window.speechSynthesis.cancel(); }
@@ -71,16 +74,9 @@ function startListening() {
     recognition = new SpeechRecognition();
     recognition.lang = loadConfig().VOICE_LANG || 'pt-BR';
     recognition.continuous = true; recognition.interimResults = false;
-    recognition.onstart = () => { listening = true; const e = $('#voiceStatus'); if (e) e.textContent = '🎙️ Ouvindo...'; setMode('LISTENING', '◉'); };
-    recognition.onend = () => {
-      if (listening) { try { recognition.start(); } catch {} return; }
-      const e = $('#voiceStatus'); if (e) e.textContent = 'Pronta.'; setMode('PAGES', '◎');
-    };
-    recognition.onerror = ev => {
-      if (ev.error === 'no-speech' || ev.error === 'aborted') { if (listening) { try { recognition.start(); } catch {} } return; }
-      if (listening) { try { recognition.start(); } catch {} return; }
-      listening = false; const e = $('#voiceStatus'); if (e) e.textContent = 'Erro: ' + (ev.error || '?'); setMode('PAGES', '◎');
-    };
+    recognition.onstart = () => { listening = true; const e = $('#voiceStatus'); if (e) e.textContent = '🎙️ Ouvindo...'; setMode('LISTENING', '◉'); document.querySelector('.orb')?.classList.add('listening'); document.querySelector('.orb')?.classList.remove('speaking'); };
+    recognition.onend = () => { if (listening) { try { recognition.start(); } catch {} return; } const e = $('#voiceStatus'); if (e) e.textContent = 'Pronta.'; setMode('PAGES', '◎'); document.querySelector('.orb')?.classList.remove('listening'); };
+    recognition.onerror = ev => { if (listening && ev.error !== 'not-allowed') { try { recognition.start(); } catch {} return; } listening = false; const e = $('#voiceStatus'); if (e) e.textContent = 'Erro: ' + (ev.error || '?'); setMode('PAGES', '◎'); document.querySelector('.orb')?.classList.remove('listening'); };
     recognition.onresult = ev => { const t = ev.results[ev.results.length - 1][0].transcript || ''; if (ev.results[ev.results.length - 1].isFinal) { const ci = $('#commandInput'); if (ci) ci.value = t; runCommand(t, true); } };
   }
   try { recognition.start(); } catch {}
@@ -101,14 +97,15 @@ function esc(t) { const d = document.createElement('div'); d.textContent = t; re
 
 // ── AI CHAT ──
 async function callAI(baseUrl, key, model, msgs) {
-  const r = await fetch(baseUrl.replace(/\/$/, '') + '/chat/completions', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + key }, body: JSON.stringify({ model, messages: msgs, max_tokens: 2048, temperature: 0.7 }) });
+  const r = await fetch(baseUrl.replace(/\/$/, '') + '/chat/completions', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + key }, body: JSON.stringify({ model, messages: msgs, max_tokens: 1024, temperature: 0.7 }) });
   if (!r.ok) { const t = await r.text(); throw new Error('HTTP ' + r.status + ': ' + t.slice(0, 200)); }
   const d = await r.json(); return d.choices?.[0]?.message?.content || 'Sem resposta.';
 }
 async function aiChat(msg) {
-  const c = loadConfig(); const mem = loadMemory().slice(-10).map(m => ({ role: m.role === 'preference' ? 'system' : m.role, content: m.text }));
-  const sys = { role: 'system', content: 'Você é JARVIS, assistente virtual. Personalidade: elegante, calma, precisa, proativa. Responda em pt-BR. Seja direto.' };
-  const msgs = [sys, ...mem, { role: 'user', content: msg }];
+  const c = loadConfig();
+  const mem = loadMemory().slice(-10).map(m => ({ role: m.role === 'preference' ? 'system' : m.role, content: m.text }));
+  const sys = { role: 'system', content: 'Você é JARVIS. Responda em pt-BR. Seja direto, claro e curto (máx 3 frases). Nunca seja repetitivo.' };
+  const msgs = [sys, ...mem, ...conversationContext.slice(-6), { role: 'user', content: msg }];
   if (c.AI_PROVIDER === 'openrouter' && c.OPENROUTER_API_KEY) return callAI('https://openrouter.ai/api/v1', c.OPENROUTER_API_KEY, c.OPENROUTER_MODEL, msgs);
   if (c.AI_PROVIDER === 'openai' && c.OPENAI_API_KEY) return callAI(c.OPENAI_BASE_URL, c.OPENAI_API_KEY, c.OPENAI_MODEL, msgs);
   if (c.AI_PROVIDER === 'nvidia' && c.NVIDIA_API_KEY) return callAI('https://integrate.api.nvidia.com/v1', c.NVIDIA_API_KEY, c.NVIDIA_MODEL, msgs);
@@ -116,146 +113,230 @@ async function aiChat(msg) {
 }
 
 // ══════════════════════════════════════════════════════
-// LOCAL REPLY — TODAS as funções do projeto original
+// LOCAL REPLY — Motor inteligente com diálogo natural
 // ══════════════════════════════════════════════════════
 function localReply(cmd) {
   const text = (cmd || '').toLowerCase().trim();
-  if (!text) return 'Estou ouvindo, Senhor.';
+  if (!text) return 'Estou ouvindo.';
 
-  if (text === 'status' || text.includes('status') || text.includes('como você está') || text.includes('tudo bem'))
-    return 'Sistema operacional. Voz ativa. Memória: ' + loadMemory().length + ' entradas. Lembretes: ' + listReminders().length + ' ativos.';
-
-  if (text.includes('testar voz') || text.includes('testa voz') || text === 'fala' || text === 'voz' || text.includes('fale'))
-    return 'Voz online. Respondendo do navegador, Senhor.';
-
-  if (text.includes('parar voz') || text.includes('para voz') || text.includes('calar') || text.includes('silêncio') || text.includes('silencio') || text === 'stop') {
-    stopSpeaking(); stopListening(); return 'Voz pausada, Senhor.';
+  // ── RESPOSTAS A PERGUNTAS DO JARVIS ──
+  if (lastQuestion) {
+    const answer = text;
+    lastQuestion = null;
+    if (lastQuestion === 'name') {
+      userName = cmd.trim().split(' ')[0];
+      localStorage.setItem('jarvis-username', userName);
+      conversationContext.push({ role: 'user', content: cmd });
+      return 'Prazer, ' + userName + '! Como posso ajudar?';
+    }
+    if (lastQuestion === 'search') {
+      window.open('https://www.google.com/search?q=' + encodeURIComponent(cmd), '_blank');
+      conversationContext.push({ role: 'user', content: cmd });
+      return 'Pesquisando "' + cmd + '".';
+    }
+    if (lastQuestion === 'open_app') {
+      return tryOpenApp(cmd);
+    }
+    conversationContext.push({ role: 'user', content: cmd });
+    return 'Entendido: "' + cmd + '". Mais alguma coisa?';
   }
 
-  if (text.includes('youtube') || text.includes('abrir yt') || text === 'yt') { window.open('https://www.youtube.com', '_blank'); return 'Abrindo YouTube.'; }
+  // ── IDENTIFICAÇÃO DO USUÁRIO ──
+  const nameMatch = text.match(/(?:meu nome é|me chamo|sou o|a|meu nome e)\s+(.+)/i);
+  if (nameMatch) {
+    userName = nameMatch[1].trim().split(' ')[0];
+    localStorage.setItem('jarvis-username', userName);
+    return 'Prazer, ' + userName + '! Como posso ajudar?';
+  }
+  if ((text.includes('quem sou eu') || text.includes('meu nome')) && userName) {
+    return 'Você é ' + userName + ', Senhor.';
+  }
 
+  // ── STATUS ──
+  if (text === 'status' || text.includes('como você está') || text.includes('tudo bem'))
+    return 'Sistema OK. Memória: ' + loadMemory().length + ' entradas. Lembretes: ' + listReminders().length + '.';
+
+  // ── VOZ ──
+  if (text.includes('testar voz') || text.includes('testa voz') || text === 'fala' || text === 'voz')
+    return 'Voz online, Senhor.';
+  if (text.includes('parar voz') || text.includes('para voz') || text.includes('calar') || text.includes('silêncio') || text === 'stop') {
+    stopSpeaking(); stopListening(); return 'Voz pausada.';
+  }
+
+  // ── YOUTUBE ──
+  if (text.includes('youtube') || text.includes('abrir yt') || text === 'yt') { window.open('https://www.youtube.com', '_blank'); return 'Abrindo YouTube.'; }
   const ytM = text.match(/(?:pesquisar|buscar|procurar|tocar|ouvir)\s+(?:no\s+)?youtube\s+(.+)/i) || text.match(/youtube\s+(.+)/i);
   if (ytM) { window.open('https://www.youtube.com/results?search_query=' + encodeURIComponent(ytM[1].trim()), '_blank'); return 'Pesquisando "' + ytM[1].trim() + '" no YouTube.'; }
 
+  // ── PESQUISA ──
   const sM = text.match(/(?:pesquisar|buscar|procurar)\s+(?:na\s+)?(?:internet|google|web)?\s*(.+)/i);
   if (sM) { const q = sM[1].replace(/^(sobre|por|de|do|da|o|a|os|as|um|uma)\s+/i, '').trim(); if (q) { window.open('https://www.google.com/search?q=' + encodeURIComponent(q), '_blank'); return 'Pesquisando "' + q + '".'; } }
   if (text.includes('pesquis') || text.includes('buscar') || text.includes('procurar')) {
     const cl = cmd.replace(/^(jarvis|por favor|,)\s*/i, '').replace(/pesquis(e|ar)|buscar|procurar|na internet|no google/gi, '').trim();
     if (cl.length > 2) { window.open('https://www.google.com/search?q=' + encodeURIComponent(cl), '_blank'); return 'Pesquisando "' + cl + '".'; }
   }
-  if (text.includes('abrir navegador') || text.includes('abrir browser') || text.includes('abrir google') || text.includes('navegador')) { window.open('https://www.google.com', '_blank'); return 'Abrindo navegador.'; }
+  if (text.includes('abrir navegador') || text.includes('abrir browser') || text.includes('abrir google') || text.includes('navegador')) { window.open('https://www.google.com', '_blank'); return 'Abrindo Google.'; }
 
   // ══════════════════════════════════════════════════════
-  // INTEGRAÇÕES — E-mail, WhatsApp, Redes Sociais, Apps
+  // INTEGRAÇÕES — Apps Web + Programas do PC
   // ══════════════════════════════════════════════════════
 
   // ── E-MAIL ──
   if (text.includes('email') || text.includes('e-mail') || text.includes('correio')) {
     const emailCmd = text.match(/(?:enviar?|escrever|compor|mandar?)\s+(?:e[-]?email|email|mensagem)\s+(?:para\s+)?(.+)/i);
-    if (emailCmd) {
-      const to = emailCmd[1].trim();
-      const subjectMatch = text.match(/assunto\s+(.+?)(?:\s+com\s+|$)/i);
-      const subject = subjectMatch ? encodeURIComponent(subjectMatch[1].trim()) : '';
-      window.open('mailto:' + to + '?subject=' + subject, '_blank');
-      return '📧 Abrindo e-mail para ' + to + '.';
-    }
-    if (text.includes('gmail')) { window.open('https://mail.google.com', '_blank'); return '📧 Abrindo Gmail.'; }
-    if (text.includes('outlook') || text.includes('hotmail')) { window.open('https://outlook.live.com', '_blank'); return '📧 Abrindo Outlook.'; }
-    if (text.includes('yahoo')) { window.open('https://mail.yahoo.com', '_blank'); return '📧 Abrindo Yahoo Mail.'; }
-    window.open('https://mail.google.com', '_blank');
-    return '📧 Abrindo Gmail.';
+    if (emailCmd) { const to = emailCmd[1].trim(); window.open('mailto:' + to, '_blank'); return 'Abrindo e-mail para ' + to + '.'; }
+    if (text.includes('gmail')) { window.open('https://mail.google.com', '_blank'); return 'Abrindo Gmail.'; }
+    if (text.includes('outlook') || text.includes('hotmail')) { window.open('https://outlook.live.com', '_blank'); return 'Abrindo Outlook.'; }
+    if (text.includes('yahoo')) { window.open('https://mail.yahoo.com', '_blank'); return 'Abrindo Yahoo Mail.'; }
+    window.open('https://mail.google.com', '_blank'); return 'Abrindo Gmail.';
   }
-  if (text === 'gmail' || text.includes('abrir gmail')) { window.open('https://mail.google.com', '_blank'); return '📧 Abrindo Gmail.'; }
-  if (text === 'outlook' || text.includes('abrir outlook') || text.includes('hotmail')) { window.open('https://outlook.live.com', '_blank'); return '📧 Abrindo Outlook.'; }
+  if (text === 'gmail' || text.includes('abrir gmail')) { window.open('https://mail.google.com', '_blank'); return 'Abrindo Gmail.'; }
+  if (text === 'outlook' || text.includes('abrir outlook')) { window.open('https://outlook.live.com', '_blank'); return 'Abrindo Outlook.'; }
 
   // ── WHATSAPP ──
   if (text.includes('whatsapp') || text.includes('whats')) {
-    if (text.includes('web') || text.includes('computador') || text.includes('pc')) {
-      window.open('https://web.whatsapp.com', '_blank');
-      return '💬 Abrindo WhatsApp Web.';
-    }
+    if (text.includes('web') || text.includes('computador') || text.includes('pc')) { window.open('https://web.whatsapp.com', '_blank'); return 'Abrindo WhatsApp Web.'; }
     const wMatch = text.match(/(?:whatsapp|whats)\s+(?:para\s+)?(\d[\d\s\-().+]{6,})/i);
-    if (wMatch) {
-      const num = wMatch[1].replace(/[\s\-().+]/g, '');
-      const msgMatch = text.match(/(?:dizendo|mensagem|falando|enviar?)\s+["']?(.+?)["']?\s*$/i);
-      const msg = msgMatch ? encodeURIComponent(msgMatch[1].trim()) : '';
-      window.open('https://wa.me/' + num + (msg ? '?text=' + msg : ''), '_blank');
-      return '💬 Abrindo WhatsApp para ' + wMatch[1].trim() + '.';
-    }
-    window.open('https://web.whatsapp.com', '_blank');
-    return '💬 Abrindo WhatsApp Web.';
+    if (wMatch) { const num = wMatch[1].replace(/[\s\-().+]/g, ''); const msgMatch = text.match(/(?:dizendo|mensagem|falando|enviar?)\s+["']?(.+?)["']?\s*$/i); const msg = msgMatch ? encodeURIComponent(msgMatch[1].trim()) : ''; window.open('https://wa.me/' + num + (msg ? '?text=' + msg : ''), '_blank'); return 'Abrindo WhatsApp para ' + wMatch[1].trim() + '.'; }
+    window.open('https://web.whatsapp.com', '_blank'); return 'Abrindo WhatsApp Web.';
   }
 
   // ── REDES SOCIAIS ──
-  if (text.includes('instagram') || text === 'insta') { window.open('https://www.instagram.com', '_blank'); return '📸 Abrindo Instagram.'; }
-  if (text.includes('twitter') || text === 'x.com' || text === 'x') { window.open('https://x.com', '_blank'); return '🐦 Abrindo X (Twitter).'; }
-  if (text.includes('facebook') || text === 'face') { window.open('https://www.facebook.com', '_blank'); return '📘 Abrindo Facebook.'; }
-  if (text.includes('linkedin')) { window.open('https://www.linkedin.com', '_blank'); return '💼 Abrindo LinkedIn.'; }
-  if (text.includes('tiktok') || text === 'tik tok') { window.open('https://www.tiktok.com', '_blank'); return '🎵 Abrindo TikTok.'; }
-  if (text.includes('telegram')) { window.open('https://web.telegram.org', '_blank'); return '✈️ Abrindo Telegram Web.'; }
-  if (text.includes('discord')) { window.open('https://discord.com/app', '_blank'); return '🎮 Abrindo Discord.'; }
-  if (text.includes('slack')) { window.open('https://app.slack.com', '_blank'); return '💬 Abrindo Slack.'; }
-  if (text.includes('teams') || text.includes('microsoft teams')) { window.open('https://teams.microsoft.com', '_blank'); return '👥 Abrindo Microsoft Teams.'; }
-  if (text.includes('zoom')) { window.open('https://zoom.us/join', '_blank'); return '📹 Abrindo Zoom.'; }
-  if (text.includes('meet') || text.includes('google meet')) { window.open('https://meet.google.com', '_blank'); return '📹 Abrindo Google Meet.'; }
+  if (text.includes('instagram') || text === 'insta') { window.open('https://www.instagram.com', '_blank'); return 'Abrindo Instagram.'; }
+  if (text.includes('twitter') || text === 'x.com' || text === 'x') { window.open('https://x.com', '_blank'); return 'Abrindo X.'; }
+  if (text.includes('facebook') || text === 'face') { window.open('https://www.facebook.com', '_blank'); return 'Abrindo Facebook.'; }
+  if (text.includes('linkedin')) { window.open('https://www.linkedin.com', '_blank'); return 'Abrindo LinkedIn.'; }
+  if (text.includes('tiktok') || text === 'tik tok') { window.open('https://www.tiktok.com', '_blank'); return 'Abrindo TikTok.'; }
+  if (text.includes('telegram')) { window.open('https://web.telegram.org', '_blank'); return 'Abrindo Telegram.'; }
+  if (text.includes('discord')) { window.open('https://discord.com/app', '_blank'); return 'Abrindo Discord.'; }
+  if (text.includes('slack')) { window.open('https://app.slack.com', '_blank'); return 'Abrindo Slack.'; }
+  if (text.includes('teams') || text.includes('microsoft teams')) { window.open('https://teams.microsoft.com', '_blank'); return 'Abrindo Teams.'; }
+  if (text.includes('zoom')) { window.open('https://zoom.us/join', '_blank'); return 'Abrindo Zoom.'; }
+  if (text.includes('meet') || text.includes('google meet')) { window.open('https://meet.google.com', '_blank'); return 'Abrindo Google Meet.'; }
+  if (text.includes('skype')) { window.open('https://web.skype.com', '_blank'); return 'Abrindo Skype.'; }
+  if (text.includes('pinterest')) { window.open('https://www.pinterest.com', '_blank'); return 'Abrindo Pinterest.'; }
+  if (text.includes('reddit')) { window.open('https://www.reddit.com', '_blank'); return 'Abrindo Reddit.'; }
 
   // ── STREAMING ──
-  if (text.includes('netflix')) { window.open('https://www.netflix.com', '_blank'); return '🎬 Abrindo Netflix.'; }
-  if (text.includes('spotify')) { window.open('https://open.spotify.com', '_blank'); return '🎵 Abrindo Spotify.'; }
-  if (text.includes('disney') || text.includes('disney+')) { window.open('https://www.disneyplus.com', '_blank'); return '✨ Abrindo Disney+.'; }
-  if (text.includes('hbo') || text.includes('max')) { window.open('https://www.max.com', '_blank'); return '🎬 Abrindo HBO Max.'; }
+  if (text.includes('netflix')) { window.open('https://www.netflix.com', '_blank'); return 'Abrindo Netflix.'; }
+  if (text.includes('spotify')) { window.open('https://open.spotify.com', '_blank'); return 'Abrindo Spotify.'; }
+  if (text.includes('disney') || text.includes('disney+')) { window.open('https://www.disneyplus.com', '_blank'); return 'Abrindo Disney+.'; }
+  if (text.includes('hbo') || text.includes('max')) { window.open('https://www.max.com', '_blank'); return 'Abrindo HBO Max.'; }
+  if (text.includes('prime video') || text.includes('amazon prime')) { window.open('https://www.primevideo.com', '_blank'); return 'Abrindo Prime Video.'; }
+  if (text.includes('youtube music')) { window.open('https://music.youtube.com', '_blank'); return 'Abrindo YouTube Music.'; }
+  if (text.includes('twitch')) { window.open('https://www.twitch.tv', '_blank'); return 'Abrindo Twitch.'; }
+  if (text.includes('apple tv') || text.includes('appletv')) { window.open('https://tv.apple.com', '_blank'); return 'Abrindo Apple TV.'; }
+  if (text.includes('globoplay') || text.includes('globo play')) { window.open('https://globoplay.globo.com', '_blank'); return 'Abrindo Globoplay.'; }
 
   // ── TRABALHO / PRODUTIVIDADE ──
-  if (text.includes('google drive') || text.includes('drive')) { window.open('https://drive.google.com', '_blank'); return '📁 Abrindo Google Drive.'; }
-  if (text.includes('google docs') || text.includes('docs')) { window.open('https://docs.google.com', '_blank'); return '📄 Abrindo Google Docs.'; }
-  if (text.includes('google sheets') || text.includes('planilha')) { window.open('https://sheets.google.com', '_blank'); return '📊 Abrindo Google Sheets.'; }
-  if (text.includes('google calendar') || text.includes('calendário') || text.includes('calendario') || text.includes('agenda')) { window.open('https://calendar.google.com', '_blank'); return '📅 Abrindo Google Calendar.'; }
-  if (text.includes('notion')) { window.open('https://www.notion.so', '_blank'); return '📝 Abrindo Notion.'; }
-  if (text.includes('trello')) { window.open('https://trello.com', '_blank'); return '📋 Abrindo Trello.'; }
-  if (text.includes('github')) { window.open('https://github.com', '_blank'); return '💻 Abrindo GitHub.'; }
-  if (text.includes('figma')) { window.open('https://www.figma.com', '_blank'); return '🎨 Abrindo Figma.'; }
-  if (text.includes('canva')) { window.open('https://www.canva.com', '_blank'); return '🎨 Abrindo Canva.'; }
+  if (text.includes('google drive') || text === 'drive') { window.open('https://drive.google.com', '_blank'); return 'Abrindo Google Drive.'; }
+  if (text.includes('google docs') || text === 'docs') { window.open('https://docs.google.com', '_blank'); return 'Abrindo Google Docs.'; }
+  if (text.includes('google sheets') || text.includes('planilha')) { window.open('https://sheets.google.com', '_blank'); return 'Abrindo Google Sheets.'; }
+  if (text.includes('google calendar') || text.includes('calendário') || text.includes('calendario') || text.includes('agenda')) { window.open('https://calendar.google.com', '_blank'); return 'Abrindo Calendar.'; }
+  if (text.includes('notion')) { window.open('https://www.notion.so', '_blank'); return 'Abrindo Notion.'; }
+  if (text.includes('trello')) { window.open('https://trello.com', '_blank'); return 'Abrindo Trello.'; }
+  if (text.includes('github')) { window.open('https://github.com', '_blank'); return 'Abrindo GitHub.'; }
+  if (text.includes('gitlab')) { window.open('https://gitlab.com', '_blank'); return 'Abrindo GitLab.'; }
+  if (text.includes('figma')) { window.open('https://www.figma.com', '_blank'); return 'Abrindo Figma.'; }
+  if (text.includes('canva')) { window.open('https://www.canva.com', '_blank'); return 'Abrindo Canva.'; }
+  if (text.includes('dropbox')) { window.open('https://www.dropbox.com', '_blank'); return 'Abrindo Dropbox.'; }
+  if (text.includes('onedrive') || text.includes('one drive')) { window.open('https://onedrive.live.com', '_blank'); return 'Abrindo OneDrive.'; }
 
   // ── COMPRAS / FINANCEIRO ──
-  if (text.includes('amazon')) { window.open('https://www.amazon.com.br', '_blank'); return '🛒 Abrindo Amazon.'; }
-  if (text.includes('mercado livre') || text.includes('mercadolibre')) { window.open('https://www.mercadolivre.com.br', '_blank'); return '🛒 Abrindo Mercado Livre.'; }
-  if (text.includes('olx')) { window.open('https://www.olx.com.br', '_blank'); return '🛒 Abrindo OLX.'; }
-  if (text.includes('shopee')) { window.open('https://shopee.com.br', '_blank'); return '🛒 Abrindo Shopee.'; }
-  if (text.includes('nubank') || text.includes('banco')) { window.open('https://app.nubank.com.br', '_blank'); return '🏦 Abrindo Nubank.'; }
-  if (text.includes('ifood')) { window.open('https://www.ifood.com.br', '_blank'); return '🍕 Abrindo iFood.'; }
+  if (text.includes('amazon')) { window.open('https://www.amazon.com.br', '_blank'); return 'Abrindo Amazon.'; }
+  if (text.includes('mercado livre') || text.includes('mercadolibre')) { window.open('https://www.mercadolivre.com.br', '_blank'); return 'Abrindo Mercado Livre.'; }
+  if (text.includes('olx')) { window.open('https://www.olx.com.br', '_blank'); return 'Abrindo OLX.'; }
+  if (text.includes('shopee')) { window.open('https://shopee.com.br', '_blank'); return 'Abrindo Shopee.'; }
+  if (text.includes('nubank') || text.includes('banco')) { window.open('https://app.nubank.com.br', '_blank'); return 'Abrindo Nubank.'; }
+  if (text.includes('ifood')) { window.open('https://www.ifood.com.br', '_blank'); return 'Abrindo iFood.'; }
+  if (text.includes('rappi')) { window.open('https://www.rappi.com.br', '_blank'); return 'Abrindo Rappi.'; }
 
   // ── NOTÍCIAS ──
-  if (text.includes('notícia') || text.includes('noticia') || text.includes('jornal')) { window.open('https://news.google.com', '_blank'); return '📰 Abrindo Google Notícias.'; }
-  if (text.includes('g1') || text.includes('globo')) { window.open('https://g1.globo.com', '_blank'); return '📰 Abrindo G1.'; }
-  if (text.includes('uol')) { window.open('https://www.uol.com.br', '_blank'); return '📰 Abrindo UOL.'; }
-  if (text.includes('cnn')) { window.open('https://www.cnnbrasil.com.br', '_blank'); return '📰 Abrindo CNN Brasil.'; }
+  if (text.includes('notícia') || text.includes('noticia') || text.includes('jornal')) { window.open('https://news.google.com', '_blank'); return 'Abrindo notícias.'; }
+  if (text.includes('g1') || text.includes('globo')) { window.open('https://g1.globo.com', '_blank'); return 'Abrindo G1.'; }
+  if (text.includes('uol')) { window.open('https://www.uol.com.br', '_blank'); return 'Abrindo UOL.'; }
+  if (text.includes('cnn')) { window.open('https://www.cnnbrasil.com.br', '_blank'); return 'Abrindo CNN.'; }
+  if (text.includes('folha')) { window.open('https://www.folha.uol.com.br', '_blank'); return 'Abrindo Folha.'; }
 
   // ── MAPAS / TRANSPORTE ──
-  if (text.includes('google maps') || text.includes('mapa')) { window.open('https://maps.google.com', '_blank'); return '🗺️ Abrindo Google Maps.'; }
-  if (text.includes('waze')) { window.open('https://www.waze.com/live-map', '_blank'); return '🗺️ Abrindo Waze.'; }
-  if (text.includes('uber')) { window.open('https://m.uber.com', '_blank'); return '🚗 Abrindo Uber.'; }
-  if (text.includes('99') || text.includes('nove nove')) { window.open('https://99app.com', '_blank'); return '🚗 Abrindo 99.'; }
+  if (text.includes('google maps') || text.includes('mapa')) { window.open('https://maps.google.com', '_blank'); return 'Abrindo Google Maps.'; }
+  if (text.includes('waze')) { window.open('https://www.waze.com/live-map', '_blank'); return 'Abrindo Waze.'; }
+  if (text.includes('uber')) { window.open('https://m.uber.com', '_blank'); return 'Abrindo Uber.'; }
+  if (text.includes('99') || text.includes('nove nove')) { window.open('https://99app.com', '_blank'); return 'Abrindo 99.'; }
 
-  // ── Open apps locais (Windows) ──
-  const oM = text.match(/(?:abrir|abre|abra)\s+(?:o|a|os|as)?\s*(.+)/i);
-  if (oM && !oM[1].includes('navegador') && !oM[1].includes('browser')) {
-    const app = oM[1].trim().toLowerCase();
-    const webApps = ['gmail','outlook','yahoo','whatsapp','instagram','twitter','facebook','linkedin','telegram','discord','slack','teams','zoom','meet','netflix','spotify','disney','hbo','max','google drive','docs','sheets','calendar','notion','trello','github','figma','canva','amazon','mercado livre','olx','shopee','nubank','ifood','maps','waze','uber','99'];
-    if (webApps.some(w => app.includes(w))) return null;
-    const prot = { 'calculadora':'ms-calculator:','bloco de notas':'notepad:','notepad':'notepad:','paint':'ms-paint:','explorador':'file:///C:/','documentos':'file:///C:/Users/User/Documents','downloads':'file:///C:/Users/User/Downloads','música':'file:///C:/Users/User/Music','musica':'file:///C:/Users/User/Music','imagens':'file:///C:/Users/User/Pictures','fotos':'file:///C:/Users/User/Pictures','vídeos':'file:///C:/Users/User/Videos','videos':'file:///C:/Users/User/Videos','desktop':'file:///C:/Users/User/Desktop' };
-    const p = prot[app];
-    if (p) { window.open(p, '_blank'); return '🖥️ Abrindo ' + app + '.'; }
-    return '💡 Não encontrei "' + app + '". Posso abrir: calculadora, bloco de notas, explorador, documentos, downloads, desktop. E web: Gmail, WhatsApp, Instagram, Spotify, Netflix, Drive, Calendar e mais.';
+  // ══════════════════════════════════════════════════════
+  // PROGRAMAS DO COMPUTADOR (Windows Protocol Handlers)
+  // ══════════════════════════════════════════════════════
+  function tryOpenApp(appName) {
+    const a = appName.toLowerCase().trim();
+    const prot = {
+      'calculadora': 'ms-calculator:', 'calc': 'ms-calculator:', 'calculador': 'ms-calculator:',
+      'bloco de notas': 'notepad:', 'notepad': 'notepad:', 'bloco': 'notepad:', 'notas': 'notepad:',
+      'paint': 'ms-paint:', 'pintura': 'ms-paint:',
+      'explorador': 'file:///C:/', 'arquivos': 'file:///C:/', 'gerenciador de arquivos': 'file:///C:/',
+      'documentos': 'file:///C:/Users/' + (process?.env?.USERNAME || 'User') + '/Documents',
+      'downloads': 'file:///C:/Users/' + (process?.env?.USERNAME || 'User') + '/Downloads',
+      'música': 'file:///C:/Users/' + (process?.env?.USERNAME || 'User') + '/Music',
+      'musica': 'file:///C:/Users/' + (process?.env?.USERNAME || 'User') + '/Music',
+      'imagens': 'file:///C:/Users/' + (process?.env?.USERNAME || 'User') + '/Pictures',
+      'fotos': 'file:///C:/Users/' + (process?.env?.USERNAME || 'User') + '/Pictures',
+      'vídeos': 'file:///C:/Users/' + (process?.env?.USERNAME || 'User') + '/Videos',
+      'videos': 'file:///C:/Users/' + (process?.env?.USERNAME || 'User') + '/Videos',
+      'desktop': 'file:///C:/Users/' + (process?.env?.USERNAME || 'User') + '/Desktop',
+      'area de trabalho': 'file:///C:/Users/' + (process?.env?.USERNAME || 'User') + '/Desktop',
+      'configurações': 'ms-settings:', 'configuracoes': 'ms-settings:', 'config': 'ms-settings:',
+      'painel de controle': 'control:', 'painel': 'control:',
+      'terminal': 'wt:', 'cmd': 'cmd:', 'prompt': 'cmd:',
+      'vscode': 'vscode:', 'visual studio code': 'vscode:',
+      'steam': 'steam:', 'epic games': 'com.epicgames.launcher:',
+      'photoshop': 'photoshop:', 'illustrator': 'illustrator:',
+      'word': 'winword:', 'excel': 'excel:', 'powerpoint': 'powerpnt:',
+      'blender': 'blender:', 'obs': 'obs-studio:',
+      'gerenciador de tarefas': 'taskmgr:', 'task manager': 'taskmgr:',
+      'editor de registro': 'regedit:', 'registro': 'regedit:',
+      'limpeza de disco': 'cleanmgr:', 'disco': 'cleanmgr:',
+      'conexão remota': 'mstss:', 'rdp': 'mstsc:',
+      'windows defender': 'windowsdefender:', 'defender': 'windowsdefender:',
+      'loja': 'ms-windows-store:', 'microsoft store': 'ms-windows-store:',
+      'email': 'mailto:', 'correio': 'mailto:',
+      'contatos': 'ms-people:', 'pessoas': 'ms-people:',
+      'fotos do windows': 'ms-photos:', 'galeria': 'ms-photos:',
+      'gravador': 'ms-soundrecorder:', 'gravador de som': 'ms-soundrecorder:',
+      'relógio': 'ms-clock:', 'alarme': 'ms-clock:', 'cronômetro': 'ms-clock:',
+      'mapas do windows': 'bingmaps:', 'mapas': 'bingmaps:',
+      'filmes e tv': 'ms-moviesandtv:', 'movies': 'ms-moviesandtv:',
+      'ajuda': 'ms-help:', 'suporte': 'ms-help:'
+    };
+    const p = prot[a];
+    if (p) { window.open(p, '_blank'); return 'Abrindo ' + appName + '.'; }
+    return null;
   }
 
+  // ── ABRIR PROGRAMAS DO PC ──
+  const openMatch = text.match(/(?:abrir|abre|abra|executar|execute|inicie|iniciar)\s+(?:o|a|os|as)?\s*(.+)/i);
+  if (openMatch) {
+    const app = openMatch[1].trim();
+    const webApps = ['gmail','outlook','yahoo','whatsapp','instagram','twitter','facebook','linkedin','telegram','discord','slack','teams','zoom','meet','skype','netflix','spotify','disney','hbo','max','prime','twitch','apple tv','globoplay','drive','docs','sheets','calendar','notion','trello','github','gitlab','figma','canva','dropbox','onedrive','amazon','mercado','olx','shopee','nubank','ifood','rappi','notícia','noticia','g1','uol','cnn','folha','maps','waze','uber','99','navegador','browser','google','youtube','email','e-mail','correio','pesquisar','buscar','procurar'];
+    if (!webApps.some(w => app.toLowerCase().includes(w))) {
+      const result = tryOpenApp(app);
+      if (result) return result;
+      // Perguntar ao usuário
+      lastQuestion = 'open_app';
+      return 'Não reconheci "' + app + '". Quer que eu pesquise como abrir esse programa?';
+    }
+  }
+
+  // ── MÚSICA ──
   if (text.includes('música') || text.includes('musica') || text.includes('tocar') || text.includes('ouvir') || text.includes('quero ouvir')) {
     const am = text.match(/(?:tocar|ouvir|música|musica)\s+(.+)/i);
     if (am) { window.open('https://www.youtube.com/results?search_query=' + encodeURIComponent(am[1].trim()), '_blank'); return 'Buscando: ' + am[1].trim() + '.'; }
     window.open('https://music.youtube.com', '_blank'); return 'Abrindo YouTube Music.';
   }
 
+  // ── CALCULADORA ──
   if (text.includes('calculadora') || text.includes('calcul') || text.includes('calcular')) { window.open('ms-calculator:', '_blank'); return 'Abrindo calculadora.'; }
 
+  // ── LEMBRETES ──
   if (text.includes('lembre') || text.includes('lembrar') || text.includes('lembret')) {
     if (text.includes('listar') || text.includes('mostrar') || text.includes('quais') || text.includes('ver')) {
       const r = listReminders(); if (!r.length) return 'Nenhum lembrete ativo.';
@@ -267,51 +348,65 @@ function localReply(cmd) {
     return 'Diga: "Lembre de [algo] em 10 minutos" ou "Lembre de [algo] amanhã às 15:30".';
   }
 
+  // ── MEMÓRIA ──
   if (text.includes('memória') || text.includes('memoria') || text.includes('o que você sabe') || text.includes('suas memórias')) {
     const m = loadMemory(); if (!m.length) return 'Memória vazia.';
     const prefs = m.filter(x => x.role === 'preference');
     const conv = m.filter(x => x.role !== 'preference').slice(-5).map(x => x.role + ': ' + x.text.slice(0, 100)).join('\n');
     return 'Conversas:\n' + conv + (prefs.length ? '\n\nPreferências:\n' + prefs.map(x => '• ' + x.text).join('\n') : '');
   }
-  if (text.includes('apagar memória') || text.includes('limpar memória') || text.includes('esquecer tudo')) { saveMemory([]); return 'Memória limpa.'; }
+  if (text.includes('apagar memória') || text.includes('limpar memória') || text.includes('esquecer tudo')) { saveMemory([]); conversationContext = []; return 'Memória limpa.'; }
   if (text.includes('esquecer prefer')) { saveMemory(loadMemory().filter(x => x.role !== 'preference')); return 'Preferências removidas.'; }
 
   const lM = cmd.match(/(?:aprenda que|lembre-se que|guarde que|saiba que|esqueça que)\s+(.+)/i);
   if (lM) { const info = lM[1].trim(); if (text.includes('esque')) { saveMemory(loadMemory().filter(x => x.role !== 'preference' || x.text.toLowerCase() !== info.toLowerCase())); return 'Preferência removida.'; } appendMemory('preference', info); return 'Aprendi: ' + info; }
 
+  // ── HORA / DATA ──
   if ((text.includes('hor') && (text.includes('são') || text.includes('sao') || text.includes('é') || text.includes('e'))) || text === 'hora' || text === 'que horas')
     return 'Agora são ' + new Date().toLocaleTimeString('pt-BR') + '.';
   if (text.includes('data') || (text.includes('dia') && (text.includes('hoje') || text.includes('é') || text.includes('e'))))
     return 'Hoje é ' + new Date().toLocaleDateString('pt-BR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) + '.';
+
+  // ── CLIMA ──
   if (text.includes('clima') || text.includes('tempo') || text.includes('temperatura') || text.includes('previsão') || text.includes('previsao'))
     { window.open('https://www.google.com/search?q=previsão+do+tempo', '_blank'); return 'Abrindo previsão do tempo.'; }
 
-  if (text.includes('opinião') || text.includes('opinao') || text.includes('o que você acha') || text.includes('o que voce acha') || text.includes('converse') || text.includes('papo'))
-    return 'Configure uma API de IA em Config para respostas completas.';
+  // ── CONVERSA LIVRE ──
+  if (text.includes('converse') || text.includes('papo') || text.includes('bater papo') || text.includes('conversar')) {
+    lastQuestion = 'chat';
+    return 'Claro! Sobre o que quer conversar?';
+  }
 
+  // ── AJUDA ──
   if (text.includes('ajuda') || text.includes('help') || text.includes('o que você faz') || text.includes('o que voce faz') || text.includes('comandos') || text === 'menu' || text === 'opções' || text === 'opcoes')
-    return `Comandos de voz:
-• "Pesquisar [tema]" / "Abrir YouTube"
-• "Abrir calculadora/bloco de notas/explorador"
-• "Lembre de [algo] em 10 min / amanhã às 15:30"
-• "Listar lembretes" / "Limpar lembretes"
-• "Que horas são?" / "Que dia é hoje?"
-• "Aprenda que [preferência]"
-• "Minha memória" / "Limpar memória"
-• "Status" / "Testar voz" / "Parar voz"
-• "Previsão do tempo"
-• "Modo seguro"
-• "Limpar chat"
-• Chat livre (configure API em Config)`;
+    return `Posso ajudar com:
+• Abrir apps: "Abrir calculadora, bloco de notas, terminal, VS Code, Steam..."
+• Web: "Abrir Gmail, WhatsApp, YouTube, Spotify, Netflix..."
+• Pesquisa: "Pesquisar [tema]"
+• Lembretes: "Lembre de [algo] em 10 min"
+• Hora, data, clima
+• Conversar: "Vamos conversar"
+• Memória: "Aprenda que [info]"
+Diga o que precisa!`;
 
+  // ── MODO SEGURO ──
   if (text.includes('modo seguro') || text.includes('safe mode')) { safeMode = !safeMode; return safeMode ? 'Modo seguro ativado.' : 'Modo seguro desativado.'; }
-  if (text.includes('limpar chat') || text.includes('limpar conversa') || text.includes('limpar mensagens')) { const m = $('#messages'); if (m) m.innerHTML = ''; return 'Chat limpo.'; }
 
+  // ── LIMPAR CHAT ──
+  if (text.includes('limpar chat') || text.includes('limpar conversa') || text.includes('limpar mensagens')) { const m = $('#messages'); if (m) m.innerHTML = ''; conversationContext = []; return 'Chat limpo.'; }
+
+  // ── ORQUESTRADORES ──
   if (text.includes('hermes') && !text.includes('envie para hermes')) return 'Hermes: orquestrador de agentes. Configure URL em Config.';
   if (text.includes('openclaw') && !text.includes('envie para openclaw')) return 'OpenClaw: executor local. Configure URL em Config.';
   if (text.includes('mcp') && !text.includes('envie para mcp')) return 'MCP: Model Context Protocol. Configure URL em Config.';
 
-  return 'Recebi: "' + cmd + '". Configure API em Config para respostas completas.';
+  // ── NÃO ENTENDEU — PERGUNTAR ──
+  if (text.length > 3) {
+    lastQuestion = 'unknown';
+    return 'Não entendi "' + cmd + '". Quer que eu pesquise isso ou abre algo relacionado?';
+  }
+
+  return 'Não entendi. Diga "ajuda" para ver os comandos.';
 }
 
 // ── ORCHESTRATOR ──
@@ -347,8 +442,9 @@ async function sendOrch(target, cmd) {
 async function runCommand(cmd, fromVoice) {
   const prompt = String(cmd || '').trim();
   addMessage('<b>Você:</b> ' + esc(prompt), 'user');
-  if (!prompt) { addMessage('<b>JARVIS:</b> Estou ouvindo.', 'assistant'); speak('Estou ouvindo.'); return; }
+  if (!prompt) { addMessage('<b>JARVIS:</b> Estou ouvindo.', 'assistant'); return; }
   appendMemory('user', prompt);
+  conversationContext.push({ role: 'user', content: prompt });
   setMode('THINKING', '◌');
   const typing = addTyping();
   try {
@@ -361,11 +457,13 @@ async function runCommand(cmd, fromVoice) {
     removeTyping(typing);
     addMessage('<b>JARVIS:</b> ' + reply, 'assistant');
     appendMemory('assistant', reply);
+    conversationContext.push({ role: 'assistant', content: reply });
+    if (conversationContext.length > 20) conversationContext = conversationContext.slice(-20);
     speak(reply);
   } catch (err) {
     removeTyping(typing);
     const reply = 'Erro: ' + err.message;
-    addMessage('<b>JARVIS:</b> ' + reply, 'assistant'); speak(reply);
+    addMessage('<b>JARVIS:</b> ' + reply, 'assistant');
   } finally { setMode(listening ? 'LISTENING' : 'PAGES', listening ? '◉' : '◎'); }
 }
 
@@ -411,15 +509,16 @@ function renderConfig() {
 function renderApp() {
   const c = loadConfig();
   const hasAI = (c.AI_PROVIDER === 'openrouter' && c.OPENROUTER_API_KEY) || (c.AI_PROVIDER === 'openai' && c.OPENAI_API_KEY) || (c.AI_PROVIDER === 'nvidia' && c.NVIDIA_API_KEY);
+  const greeting = userName ? 'Olá, ' + userName + '!' : 'Olá! Diga seu nome ou peça ajuda.';
 
   APP.innerHTML = `<header class="topbar"><div class="brand">J·A·R·V·I·S</div><nav><button class="tab active" data-tab="pages">Pages</button><button class="tab" data-tab="config">Config</button></nav><div class="clock" id="clock">--:--:--</div></header>
   <section class="layout">
     <aside class="panel left"><h3>◉ STATUS</h3><div id="status" class="orchestrator">${hasAI ? 'IA: ' + c.AI_PROVIDER : 'Modo local. Configure API em Config.'}</div><h3>◉ VOZ</h3><div id="voiceStatus" class="orchestrator">Pronta.</div><h3>◉ MEMÓRIA</h3><div id="memStatus" class="orchestrator">${loadMemory().length} entradas • ${listReminders().length} lembretes</div></aside>
     <main class="center">
-      <section class="screen tabpage active" id="tab-pages"><div class="orb-wrap"><div class="orb"><div class="face"><h1 id="mood">◎</h1><p id="mode">PAGES</p></div></div></div><div class="chatbox" id="messages"></div><div class="composer"><input id="commandInput" placeholder="Diga ou digite seu comando..." /><button id="sendCommand">Enviar</button></div><div class="quick"><button id="testVoice">🔊 Testar voz</button><button id="startVoice">🎙️ Falar</button><button id="stopVoice" style="display:none">⏹️ Parar</button><button id="openYouTube">📺 YouTube</button><button id="openBrowser">🌐 Pesquisar</button></div><p class="muted">Voz local ativa. Chat com IA via API do navegador. Configure em Config.</p></section>
+      <section class="screen tabpage active" id="tab-pages"><div class="orb-wrap"><div class="orb"><div class="face"><h1 id="mood">◎</h1><p id="mode">PAGES</p></div></div></div><div class="chatbox" id="messages"></div><div class="composer"><input id="commandInput" placeholder="Diga ou digite seu comando..." /><button id="sendCommand">Enviar</button></div><div class="quick"><button id="testVoice">🔊 Testar voz</button><button id="startVoice">🎙️ Falar</button><button id="stopVoice" style="display:none">⏹️ Parar</button><button id="openYouTube">📺 YouTube</button><button id="openBrowser">🌐 Pesquisar</button></div><p class="muted">Voz contínua. Programas do PC. Diálogo natural. Diga "ajuda".</p></section>
       <section class="screen tabpage" id="tab-config"><h2>⚙️ Configuração</h2><div id="configPanel"></div></section>
     </main>
-    <aside class="panel right"><h3>▸ OBSERVAÇÕES</h3><div class="orchestrator"><p><b>Pages:</b> ativo.</p><p><b>JARVIS pronto.</b></p><p>Voz local ativa.</p></div><h3>▸ ORQUESTRADOR</h3><div id="orchestratorStatus" class="orchestrator">Verificando...</div></aside>
+    <aside class="panel right"><h3>▸ OBSERVAÇÕES</h3><div class="orchestrator"><p><b>Pages:</b> ativo.</p><p><b>JARVIS v3.0</b></p><p>Voz contínua.</p><p>Diálogo natural.</p></div><h3>▸ ORQUESTRADOR</h3><div id="orchestratorStatus" class="orchestrator">Verificando...</div></aside>
   </section>`;
 
   // Tabs
@@ -443,7 +542,7 @@ function renderApp() {
   // Mem status
   setInterval(() => { const e = $('#memStatus'); if (e) e.textContent = loadMemory().length + ' entradas • ' + listReminders().length + ' lembretes'; }, 10000);
   // Init msg
-  addMessage('<b>JARVIS:</b> Página pública pronta. Voz local ativa. Configure API em Config para IA completa.', 'assistant');
+  addMessage('<b>JARVIS:</b> ' + greeting + ' Voz contínua, programas do PC, diálogo natural. Diga "ajuda" para comandos.', 'assistant');
 }
 
 // ── INIT ──
