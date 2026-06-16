@@ -105,3 +105,39 @@ nav{display:flex;gap:10px;justify-content:center}
 }
 
 .voice-hint{font-size:11px;line-height:1.45;color:rgba(220,245,255,.72);border-left:2px solid rgba(76,209,255,.55);padding:8px 10px;margin:8px 0 10px;background:rgba(10,35,48,.38);border-radius:8px;}
+
+/* Typing indicator */
+.typing .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--cyan);margin:0 3px;animation:blink 1.2s infinite}
+.typing .dot:nth-child(2){animation-delay:.2s}
+.typing .dot:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%,80%,100%{opacity:.2}40%{opacity:1}}
+
+/* Config panel */
+.config-section{border:1px solid var(--line);border-radius:12px;padding:14px;margin:12px 0;background:rgba(0,0,0,.15)}
+.config-section h4{margin:0 0 10px;color:var(--cyan);font-size:13px;letter-spacing:.1em}
+.config-section input,.config-section select{margin:4px 0 8px}
+.config-section label{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.08em;margin:6px 0}
+.config-section input[type=range]{width:100px}
+.config-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+.config-test-result{margin-top:10px;padding:10px;border-radius:8px;background:rgba(0,0,0,.2);color:var(--muted);font-size:13px;min-height:20px}
+.btn.danger{border-color:rgba(255,100,100,.3);color:#ff8080}
+.btn.danger:hover{border-color:rgba(255,100,100,.6);background:rgba(255,100,100,.1)}
+
+/* Tab pages */
+.tabpage{display:none}
+.tabpage.active{display:flex}
+
+/* Orchestrator status */
+#orchestratorStatus{font-size:12px;line-height:1.5}
+
+/* Approvals */
+.approval-item{border:1px solid var(--line);border-radius:8px;padding:8px;margin:6px 0;background:rgba(0,0,0,.15);font-size:12px}
+.approval-item .scope{color:var(--amber);font-family:monospace;font-size:11px}
+.approval-item .actions{display:flex;gap:6px;margin-top:6px}
+.approval-item button{padding:4px 10px;font-size:11px}
+
+/* Responsive config */
+@media(max-width:1000px){
+  .config-actions{flex-direction:column}
+  .config-section input[type=range]{width:80px}
+}
