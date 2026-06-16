@@ -58,6 +58,44 @@ function loadApprovals() { return Store.get('approvals', { trusted: [], pending:
 function saveApprovals(a) { Store.set('approvals', a); }
 
 // ── VOICE ──
+let audioCtx = null;
+let keepAliveInterval = null;
+
+function startKeepAlive() {
+  // Cria um oscilador silencioso para manter a página "ativa"
+  // Impede que Chrome/Firefox suspendam o reconhecimento em segundo plano
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  } catch {}
+  // Fallback: usa um <audio> com silêncio como keep-alive
+  if (!window._jarvisKeepAliveAudio) {
+    const audio = document.createElement('audio');
+    audio.id = 'jarvis-keepalive';
+    audio.loop = true;
+    audio.volume = 0.01;
+    // WAV de 1 segundo de silêncio (base64 mínimo)
+    audio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+    document.body.appendChild(audio);
+    window._jarvisKeepAliveAudio = audio;
+  }
+  try { window._jarvisKeepAliveAudio.play(); } catch {}
+  // Keep-alive periódico via visibility change
+  if (!keepAliveInterval) {
+    keepAliveInterval = setInterval(() => {
+      if (listening && recognition) {
+        try { recognition.start(); } catch {}
+      }
+    }, 5000);
+  }
+}
+
+function stopKeepAlive() {
+  try { window._jarvisKeepAliveAudio?.pause(); } catch {}
+  if (keepAliveInterval) { clearInterval(keepAliveInterval); keepAliveInterval = null; }
+  if (audioCtx) { try { audioCtx.close(); } catch {} audioCtx = null; }
+}
+
 function speak(text) {
   if (!('speechSynthesis' in window)) return;
   window.speechSynthesis.cancel();
@@ -68,24 +106,84 @@ function speak(text) {
   window.speechSynthesis.speak(u);
 }
 function stopSpeaking() { if ('speechSynthesis' in window) window.speechSynthesis.cancel(); }
+
 function startListening() {
   if (!SpeechRecognition) { const e = $('#voiceStatus'); if (e) e.textContent = 'Sem reconhecimento de voz.'; return; }
+
+  // Ativa keep-alive ANTES de iniciar o reconhecimento
+  startKeepAlive();
+
   if (!recognition) {
     recognition = new SpeechRecognition();
     recognition.lang = loadConfig().VOICE_LANG || 'pt-BR';
-    recognition.continuous = true; recognition.interimResults = false;
-    recognition.onstart = () => { listening = true; const e = $('#voiceStatus'); if (e) e.textContent = '🎙️ Ouvindo...'; setMode('LISTENING', '◉'); document.querySelector('.orb')?.classList.add('listening'); document.querySelector('.orb')?.classList.remove('speaking'); };
-    recognition.onend = () => { if (listening) { try { recognition.start(); } catch {} return; } const e = $('#voiceStatus'); if (e) e.textContent = 'Pronta.'; setMode('PAGES', '◎'); document.querySelector('.orb')?.classList.remove('listening'); };
-    recognition.onerror = ev => { if (listening && ev.error !== 'not-allowed') { try { recognition.start(); } catch {} return; } listening = false; const e = $('#voiceStatus'); if (e) e.textContent = 'Erro: ' + (ev.error || '?'); setMode('PAGES', '◎'); document.querySelector('.orb')?.classList.remove('listening'); };
-    recognition.onresult = ev => { const t = ev.results[ev.results.length - 1][0].transcript || ''; if (ev.results[ev.results.length - 1].isFinal) { const ci = $('#commandInput'); if (ci) ci.value = t; runCommand(t, true); } };
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      listening = true;
+      const e = $('#voiceStatus'); if (e) e.textContent = '🎙️ Ouvindo...';
+      setMode('LISTENING', '◉');
+      document.querySelector('.orb')?.classList.add('listening');
+      document.querySelector('.orb')?.classList.remove('speaking');
+    };
+
+    recognition.onend = () => {
+      // Se ainda está no modo listening, reinicia IMEDIATAMENTE
+      if (listening) {
+        try { recognition.start(); } catch {}
+        return;
+      }
+      // Só para quando o usuário clicou em Parar
+      const e = $('#voiceStatus'); if (e) e.textContent = 'Pronta.';
+      setMode('PAGES', '◎');
+      document.querySelector('.orb')?.classList.remove('listening');
+      stopKeepAlive();
+    };
+
+    recognition.onerror = ev => {
+      // Ignora erros comuns de segundo plano
+      if (ev.error === 'no-speech' || ev.error === 'aborted' || ev.error === 'network') {
+        if (listening) { try { recognition.start(); } catch {} }
+        return;
+      }
+      // Erro real (ex: not-allowed)
+      if (ev.error === 'not-allowed') {
+        listening = false;
+        const e = $('#voiceStatus'); if (e) e.textContent = '❌ Microfone bloqueado. Permita o acesso.';
+        setMode('PAGES', '◎');
+        document.querySelector('.orb')?.classList.remove('listening');
+        stopKeepAlive();
+        return;
+      }
+      // Outros erros: tenta reiniciar
+      if (listening) { try { recognition.start(); } catch {} return; }
+      listening = false;
+      const e = $('#voiceStatus'); if (e) e.textContent = 'Erro: ' + (ev.error || '?');
+      setMode('PAGES', '◎');
+      document.querySelector('.orb')?.classList.remove('listening');
+      stopKeepAlive();
+    };
+
+    recognition.onresult = ev => {
+      const t = ev.results[ev.results.length - 1][0].transcript || '';
+      if (ev.results[ev.results.length - 1].isFinal) {
+        const ci = $('#commandInput'); if (ci) ci.value = t;
+        runCommand(t, true);
+      }
+    };
   }
+
   try { recognition.start(); } catch {}
 }
+
 function stopListening() {
   listening = false;
   if (recognition) { try { recognition.stop(); } catch {} }
   const e = $('#voiceStatus'); if (e) e.textContent = '⏹️ Parada.';
   setMode('PAGES', '◎');
+  document.querySelector('.orb')?.classList.remove('listening');
+  stopKeepAlive();
 }
 
 // ── UI ──
@@ -599,8 +697,14 @@ function renderApp() {
   setInterval(() => { const d = dueReminders(); if (d.length) { const t = 'Lembrete: ' + d[0].text; addMessage('<b>JARVIS:</b> ⏰ ' + t, 'assistant'); speak(t); const r = loadReminders(); const it = r.find(x => x.id === d[0].id); if (it) it.done = true; saveReminders(r); } }, 30000);
   // Mem status
   setInterval(() => { const e = $('#memStatus'); if (e) e.textContent = loadMemory().length + ' entradas • ' + listReminders().length + ' lembretes'; }, 10000);
+  // Visibility change — reinicia reconhecimento quando aba volta ao foco
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && listening && recognition) {
+      try { recognition.start(); } catch {}
+    }
+  });
   // Init msg
-  addMessage('<b>JARVIS:</b> ' + greeting + ' Voz contínua, programas do PC, diálogo natural. Diga "ajuda" para comandos.', 'assistant');
+  addMessage('<b>JARVIS:</b> ' + greeting + ' Voz contínua, programas do PC, ChatGPT. Diga "ajuda" para comandos.', 'assistant');
 }
 
 // ── INIT ──
