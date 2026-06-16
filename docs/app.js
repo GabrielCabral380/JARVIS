@@ -618,8 +618,9 @@ function localReply(cmd) {
   if (text.includes('99') || text.includes('nove nove')) { window.open('https://99app.com', '_blank'); return 'Abrindo 99.'; }
 
   // 
-  // PROGRAMAS DO COMPUTADOR (Windows Protocol Handlers)
-  // 
+  // PROGRAMAS DO COMPUTADOR (Windows)
+  // Usa protocol handlers do Windows via window.open
+  //
   function tryOpenApp(appName) {
     const a = appName.toLowerCase().trim();
     const prot = {
@@ -627,23 +628,22 @@ function localReply(cmd) {
       'bloco de notas': 'notepad:', 'notepad': 'notepad:', 'bloco': 'notepad:', 'notas': 'notepad:',
       'paint': 'ms-paint:', 'pintura': 'ms-paint:',
       'explorador': 'file:///C:/', 'arquivos': 'file:///C:/', 'gerenciador de arquivos': 'file:///C:/',
-      'documentos': 'file:///C:/Users/Usuario/Documents',
-      'downloads': 'file:///C:/Users/Usuario/Downloads',
-      'música': 'file:///C:/Users/Usuario/Music',
-      'musica': 'file:///C:/Users/Usuario/Music',
-      'imagens': 'file:///C:/Users/Usuario/Pictures',
-      'fotos': 'file:///C:/Users/Usuario/Pictures',
-      'vídeos': 'file:///C:/Users/Usuario/Videos',
-      'videos': 'file:///C:/Users/Usuario/Videos',
-      'desktop': 'file:///C:/Users/Usuario/Desktop',
-      'area de trabalho': 'file:///C:/Users/Usuario/Desktop',
+      'documentos': 'file:///C://Users/' + (process?.env?.USERNAME || 'Usuario') + '/Documents',
+      'downloads': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Downloads',
+      'música': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Music',
+      'musica': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Music',
+      'imagens': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Pictures',
+      'fotos': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Pictures',
+      'vídeos': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Videos',
+      'videos': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Videos',
+      'desktop': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Desktop',
+      'area de trabalho': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Desktop',
       'configurações': 'ms-settings:', 'configuracoes': 'ms-settings:', 'config': 'ms-settings:',
       'painel de controle': 'control:', 'painel': 'control:',
       'terminal': 'wt:', 'cmd': 'cmd:', 'prompt': 'cmd:',
       'vscode': 'vscode:', 'visual studio code': 'vscode:',
       'steam': 'steam:', 'epic games': 'com.epicgames.launcher:',
       'photoshop': 'photoshop:', 'illustrator': 'illustrator:',
-      'word': 'winword:', 'excel': 'excel:', 'powerpoint': 'powerpnt:',
       'blender': 'blender:', 'obs': 'obs-studio:',
       'gerenciador de tarefas': 'taskmgr:', 'task manager': 'taskmgr:',
       'editor de registro': 'regedit:', 'registro': 'regedit:',
@@ -660,8 +660,31 @@ function localReply(cmd) {
       'filmes e tv': 'ms-moviesandtv:', 'movies': 'ms-moviesandtv:',
       'ajuda': 'ms-help:', 'suporte': 'ms-help:'
     };
+
+    // MS Office e apps especiais via shell
+    const shellApps = {
+      'word': 'winword',
+      'excel': 'excel',
+      'powerpoint': 'powerpnt',
+      'power point': 'powerpnt',
+      'outlook': 'outlook',
+      'onenote': 'onenote',
+      'teams': 'teams',
+      'access': 'msaccess',
+      'publisher': 'mspub',
+    };
+
+    // Tenta protocol handler primeiro
     const p = prot[a];
     if (p) { window.open(p, '_blank'); return 'Abrindo ' + appName + '.'; }
+
+    // Tenta shell app (MS Office etc)
+    const shellCmd = shellApps[a];
+    if (shellCmd) {
+      window.open('shell:AppsFolder\\' + shellCmd, '_blank');
+      return 'Abrindo ' + appName + '.';
+    }
+
     return null;
   }
 
