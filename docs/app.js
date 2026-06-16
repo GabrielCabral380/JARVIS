@@ -1,563 +1,257 @@
 // ══════════════════════════════════════════════════════
-// JARVIS — Client-Side Full Implementation
+// JARVIS — Client-Side Full Implementation v2.0
 // Funciona 100% no GitHub Pages sem backend
+// Todas as funções do projeto original por voz
 // ══════════════════════════════════════════════════════
 
-const $ = (s) => document.querySelector(s);
+const $ = s => document.querySelector(s);
 const APP = document.getElementById('app');
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 let recognition = null;
 let listening = false;
 let safeMode = false;
-let approvalsCache = { trusted: [], pending: [], policy: 'once' };
 
-// ══════════════════════════════════════════════════════
-// STORAGE HELPERS
-// ══════════════════════════════════════════════════════
-
+// ── STORAGE ──
 const Store = {
-  get(key, def) {
-    try { return JSON.parse(localStorage.getItem('jarvis-' + key)) ?? def; } catch { return def; }
-  },
-  set(key, val) {
-    localStorage.setItem('jarvis-' + key, JSON.stringify(val));
-  },
-  del(key) { localStorage.removeItem('jarvis-' + key); }
+  get(k, d) { try { return JSON.parse(localStorage.getItem('jarvis-' + k)) ?? d; } catch { return d; } },
+  set(k, v) { localStorage.setItem('jarvis-' + k, JSON.stringify(v)); },
+  del(k) { localStorage.removeItem('jarvis-' + k); }
 };
 
-// ══════════════════════════════════════════════════════
-// CONFIG
-// ══════════════════════════════════════════════════════
-
-const DEFAULT_CONFIG = {
-  AI_PROVIDER: 'local',
-  OPENAI_API_KEY: '',
-  OPENAI_MODEL: 'gpt-4o-mini',
-  OPENAI_BASE_URL: 'https://api.openai.com/v1',
-  OPENROUTER_API_KEY: '',
-  OPENROUTER_MODEL: 'openai/gpt-4o-mini',
-  OPENROUTER_SITE_URL: 'https://gabrielcabral380.github.io/JARVIS/',
-  OPENROUTER_SITE_NAME: 'JARVIS Cloud Access',
-  NVIDIA_API_KEY: '',
-  NVIDIA_MODEL: 'meta/llama-3.1-70b-instruct',
-  CODEX_ENABLED: false,
-  HERMES_ENABLED: true,
-  HERMES_URL: 'http://localhost:8001',
-  OPENCLAW_ENABLED: true,
-  OPENCLAW_URL: 'http://localhost:8675',
-  MCP_ENABLED: true,
-  MCP_URL: 'http://localhost:3001/mcp',
-  LOCAL_TOOLS_ENABLED: true,
-  APPROVAL_POLICY: 'once',
-  VOICE_LANG: 'pt-BR',
-  VOICE_RATE: 1.0,
-  VOICE_PITCH: 0.95,
-  CONTINUOUS_VOICE: true
+// ── CONFIG ──
+const DEFAULTS = {
+  AI_PROVIDER: 'local', OPENAI_API_KEY: '', OPENAI_MODEL: 'gpt-4o-mini', OPENAI_BASE_URL: 'https://api.openai.com/v1',
+  OPENROUTER_API_KEY: '', OPENROUTER_MODEL: 'openai/gpt-4o-mini', OPENROUTER_SITE_URL: 'https://gabrielcabral380.github.io/JARVIS/', OPENROUTER_SITE_NAME: 'JARVIS Cloud',
+  NVIDIA_API_KEY: '', NVIDIA_MODEL: 'meta/llama-3.1-70b-instruct',
+  CODEX_ENABLED: false, HERMES_ENABLED: true, HERMES_URL: 'http://localhost:8001',
+  OPENCLAW_ENABLED: true, OPENCLAW_URL: 'http://localhost:8675',
+  MCP_ENABLED: true, MCP_URL: 'http://localhost:3001/mcp',
+  LOCAL_TOOLS_ENABLED: true, APPROVAL_POLICY: 'once',
+  VOICE_LANG: 'pt-BR', VOICE_RATE: 1.0, VOICE_PITCH: 0.95, CONTINUOUS_VOICE: true
 };
+function loadConfig() { return { ...DEFAULTS, ...Store.get('config', {}) }; }
+function saveConfig(p) { const c = loadConfig(); Object.assign(c, p); Store.set('config', c); return c; }
 
-function loadConfig() {
-  const saved = Store.get('config', {});
-  return { ...DEFAULT_CONFIG, ...saved };
-}
-
-function saveConfig(patch) {
-  const config = loadConfig();
-  Object.assign(config, patch);
-  Store.set('config', config);
-  return config;
-}
-
-const CONFIG = loadConfig();
-
-// ══════════════════════════════════════════════════════
-// MEMORY
-// ══════════════════════════════════════════════════════
-
+// ── MEMORY ──
 function loadMemory() { return Store.get('memory', []); }
-function saveMemory(mem) { Store.set('memory', mem.slice(-200)); }
+function saveMemory(m) { Store.set('memory', m.slice(-200)); }
+function appendMemory(role, text) { const m = loadMemory(); m.push({ role, text: String(text).slice(0, 1200), ts: new Date().toISOString() }); saveMemory(m); }
 
-function appendMemory(role, text) {
-  const mem = loadMemory();
-  mem.push({ role, text: String(text).slice(0, 1200), ts: new Date().toISOString() });
-  saveMemory(mem);
-}
-
-function memoryContext(roleFilter, limit = 20) {
-  return loadMemory().filter(m => !roleFilter || m.role === roleFilter).slice(-limit);
-}
-
-// ══════════════════════════════════════════════════════
-// REMINDERS
-// ══════════════════════════════════════════════════════
-
+// ── REMINDERS ──
 function loadReminders() { return Store.get('reminders', []); }
 function saveReminders(r) { Store.set('reminders', r); }
-
-function addReminder(text, when) {
-  const r = loadReminders();
-  r.push({ id: Date.now().toString(36), text, when: when || null, done: false, created: new Date().toISOString() });
-  saveReminders(r);
-  return r[r.length - 1];
-}
-
-function removeReminder(id) {
-  saveReminders(loadReminders().filter(r => r.id !== id));
-}
-
-function dueReminders() {
-  const now = Date.now();
-  return loadReminders().filter(r => !r.done && r.when && new Date(r.when).getTime() <= now);
-}
-
+function addReminder(text, when) { const r = loadReminders(); r.push({ id: Date.now().toString(36), text, when: when || null, done: false, created: new Date().toISOString() }); saveReminders(r); return r[r.length - 1]; }
 function listReminders() { return loadReminders().filter(r => !r.done); }
-
-// ══════════════════════════════════════════════════════
-// APPROVAL SYSTEM
-// ══════════════════════════════════════════════════════
-
-function loadApprovals() {
-  return Store.get('approvals', { trusted: [], pending: [], policy: 'once' });
-}
-function saveApprovals(a) { Store.set('approvals', a); }
-
-function checkApproval(kind, action, target) {
-  const a = loadApprovals();
-  const scope = `${kind}:${action}:${target || 'generic'}`;
-  if (a.policy === 'off') return { approved: true };
-  if (a.policy === 'once' && a.trusted.includes(scope)) return { approved: true };
-  const token = 'apr_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
-  a.pending.push({ token, scope, kind, action, target, created: new Date().toISOString() });
-  saveApprovals(a);
-  return { approved: false, token, scope };
-}
-
-function approveAction(token, trust = true) {
-  const a = loadApprovals();
-  const idx = a.pending.findIndex(p => p.token === token);
-  if (idx < 0) return null;
-  const item = a.pending.splice(idx, 1)[0];
-  if (trust) a.trusted.push(item.scope);
-  saveApprovals(a);
-  return item;
-}
-
-// ══════════════════════════════════════════════════════
-// VOICE
-// ══════════════════════════════════════════════════════
-
-function speak(text, onStart, onEnd) {
-  if (!('speechSynthesis' in window)) {
-    updateVoiceStatus('Navegador não suporta síntese de voz.');
-    return;
-  }
-  window.speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = CONFIG.VOICE_LANG;
-  u.rate = CONFIG.VOICE_RATE;
-  u.pitch = CONFIG.VOICE_PITCH;
-  u.onstart = () => {
-    updateVoiceStatus('Falando agora.');
-    setMode('SPEAKING', '◉');
-    if (onStart) onStart();
-  };
-  u.onend = () => {
-    updateVoiceStatus(listening ? 'Ouvindo...' : 'Pronta para síntese de voz.');
-    setMode(listening ? 'LISTENING' : 'PAGES', listening ? '◉' : '◎');
-    if (onEnd) onEnd();
-  };
-  window.speechSynthesis.speak(u);
-}
-
-function stopSpeaking() {
-  if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-}
-
-function startListening() {
-  if (!SpeechRecognition) {
-    updateVoiceStatus('Reconhecimento de voz não suportado.');
-    speak('Este navegador não suporta reconhecimento de voz.');
-    return;
-  }
-  if (!recognition) {
-    recognition = new SpeechRecognition();
-    recognition.lang = CONFIG.VOICE_LANG;
-    recognition.continuous = CONFIG.CONTINUOUS_VOICE;
-    recognition.interimResults = false;
-    recognition.onstart = () => {
-      listening = true;
-      updateVoiceStatus('Ouvindo...');
-      setMode('LISTENING', '◉');
-    };
-    recognition.onend = () => {
-      listening = false;
-      updateVoiceStatus('Pronta para síntese de voz.');
-      setMode('PAGES', '◎');
-    };
-    recognition.onerror = (e) => {
-      listening = false;
-      updateVoiceStatus('Falha ao capturar voz: ' + (e.error || 'erro'));
-      setMode('PAGES', '◎');
-    };
-    recognition.onresult = (event) => {
-      const transcript = event.results[event.results.length - 1][0].transcript || '';
-      if (event.results[event.results.length - 1].isFinal) {
-        $('#commandInput').value = transcript;
-        runCommand(transcript, true);
-      }
-    };
-  }
-  try { recognition.start(); } catch { /* already started */ }
-}
-
-function stopListening() {
-  if (recognition) { try { recognition.stop(); } catch {} }
-  listening = false;
-}
-
-// ══════════════════════════════════════════════════════
-// UI HELPERS
-// ══════════════════════════════════════════════════════
-
-function setMode(mode, mood) {
-  const modeEl = $('#mode');
-  const moodEl = $('#mood');
-  if (modeEl) modeEl.textContent = mode;
-  if (moodEl) moodEl.textContent = mood || '◎';
-}
-
-function updateStatus(html) {
-  const el = $('#status');
-  if (el) el.innerHTML = html;
-}
-
-function updateVoiceStatus(text) {
-  const el = $('#voiceStatus');
-  if (el) el.textContent = text;
-}
-
-function addMessage(text, type) {
-  const wrap = $('#messages');
-  if (!wrap) return;
-  const d = document.createElement('div');
-  d.className = 'msg ' + (type || 'assistant');
-  d.innerHTML = text;
-  wrap.appendChild(d);
-  wrap.scrollTop = wrap.scrollHeight;
-}
-
-function addTyping() {
-  const wrap = $('#messages');
-  if (!wrap) return null;
-  const d = document.createElement('div');
-  d.className = 'msg assistant typing';
-  d.innerHTML = '<span class="dot"></span><span class="dot"></span><span class="dot"></span>';
-  wrap.appendChild(d);
-  wrap.scrollTop = wrap.scrollHeight;
-  return d;
-}
-
-function removeTyping(el) {
-  if (el && el.parentNode) el.parentNode.removeChild(el);
-}
-
-// ══════════════════════════════════════════════════════
-// AI CHAT — Client-side API calls
-// ══════════════════════════════════════════════════════
-
-async function callOpenAI(baseUrl, apiKey, model, messages) {
-  const res = await fetch(baseUrl.replace(/\/$/, '') + '/chat/completions', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'authorization': 'Bearer ' + apiKey },
-    body: JSON.stringify({ model, messages, max_tokens: 2048, temperature: 0.7 })
-  });
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error('HTTP ' + res.status + ': ' + errText.slice(0, 200));
-  }
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content || 'Sem resposta.';
-}
-
-async function callOpenRouter(apiKey, model, messages) {
-  return callOpenAI('https://openrouter.ai/api/v1', apiKey, model, messages);
-}
-
-async function callNVIDIA(apiKey, model, messages) {
-  return callOpenAI('https://integrate.api.nvidia.com/v1', apiKey, model, messages);
-}
-
-async function aiChat(userMessage) {
-  const cfg = loadConfig();
-  const provider = cfg.AI_PROVIDER;
-
-  // Build context from memory
-  const memCtx = memoryContext(null, 10);
-  const systemPrompt = {
-    role: 'system',
-    content: 'Você é JARVIS, assistente virtual inteligente. Personalidade: elegante, calma, precisa e proativa. Responda sempre em português brasileiro. Seja direto e útil. Use o contexto da memória quando relevante.'
-  };
-
-  const history = memCtx.map(m => ({ role: m.role, content: m.text }));
-  const messages = [systemPrompt, ...history, { role: 'user', content: userMessage }];
-
-  if (provider === 'openrouter' && cfg.OPENROUTER_API_KEY) {
-    return callOpenRouter(cfg.OPENROUTER_API_KEY, cfg.OPENROUTER_MODEL, messages);
-  }
-  if (provider === 'openai' && cfg.OPENAI_API_KEY) {
-    return callOpenAI(cfg.OPENAI_BASE_URL, cfg.OPENAI_API_KEY, cfg.OPENAI_MODEL, messages);
-  }
-  if (provider === 'nvidia' && cfg.NVIDIA_API_KEY) {
-    return callNVIDIA(cfg.NVIDIA_API_KEY, cfg.NVIDIA_MODEL, messages);
-  }
-
-  // Local fallback
-  return localReply(userMessage);
-}
-
-// ══════════════════════════════════════════════════════
-// LOCAL TOOLS
-// ══════════════════════════════════════════════════════
-
+function dueReminders() { const n = Date.now(); return loadReminders().filter(r => !r.done && r.when && new Date(r.when).getTime() <= n); }
 function parseReminder(text) {
   const t = text.toLowerCase();
-  const patterns = [
-    /(?:me\s+)?lembre\s+(?:de\s+)?(.+?)(?:\s+em\s+(\d+)\s*(?:min|minutos?|h|horas?))?$/i,
-    /(?:me\s+)?lembrar\s+(?:de\s+)?(.+?)(?:\s+em\s+(\d+)\s*(?:min|minutos?|h|horas?))?$/i,
-    /(?:me\s+)?lembre\s+(?:de\s+)?(.+?)(?:\s+(?:amanh[ãa]|[0-9]{1,2}:[0-9]{2}))?$/i,
-  ];
-  for (const p of patterns) {
-    const m = text.match(p);
-    if (m) {
-      const reminderText = m[1].trim();
-      let when = null;
-      if (m[2]) {
-        const num = parseInt(m[2]);
-        const isHour = t.includes('hora') || t.includes('h');
-        when = new Date(Date.now() + num * (isHour ? 3600000 : 60000)).toISOString();
-      } else if (t.includes('amanh')) {
-        const d = new Date();
-        d.setDate(d.getDate() + 1);
-        d.setHours(9, 0, 0, 0);
-        when = d.toISOString();
-      }
-      return { text: reminderText, when };
-    }
-  }
+  const patterns = [/(?:me\s+)?lembre\s+(?:de\s+)?(.+?)(?:\s+em\s+(\d+)\s*(?:min|minutos?|h|horas?))?$/i, /(?:me\s+)?lembrar\s+(?:de\s+)?(.+?)(?:\s+em\s+(\d+)\s*(?:min|minutos?|h|horas?))?$/i, /(?:me\s+)?lembre\s+(?:de\s+)?(.+?)(?:\s+(?:amanh[ãa]|hoje)\s*(?:[àa]s\s+)?([0-9]{1,2}:[0-9]{2}))?$/i, /(?:me\s+)?lembre\s+(?:de\s+)?(.+?)(?:\s+(?:amanh[ãa]|[0-9]{1,2}:[0-9]{2}))?$/i];
+  for (const p of patterns) { const m = text.match(p); if (m) { const rt = m[1].trim(); let w = null; if (m[2]) { if (m[2].includes(':')) { const [hh, mm] = m[2].split(':'); const d = new Date(); d.setHours(parseInt(hh), parseInt(mm), 0, 0); if (d < Date.now()) d.setDate(d.getDate() + 1); w = d.toISOString(); } else { const n = parseInt(m[2]); w = new Date(Date.now() + n * (t.includes('hora') ? 3600000 : 60000)).toISOString(); } } else if (t.includes('amanh')) { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); w = d.toISOString(); } return { text: rt, when: w }; } }
   return null;
 }
 
-function localReply(command) {
-  const text = (command || '').toLowerCase().trim();
+// ── APPROVALS ──
+function loadApprovals() { return Store.get('approvals', { trusted: [], pending: [], policy: 'once' }); }
+function saveApprovals(a) { Store.set('approvals', a); }
+
+// ── VOICE ──
+function speak(text) {
+  if (!('speechSynthesis' in window)) { const e = $('#voiceStatus'); if (e) e.textContent = 'Sem suporte a voz.'; return; }
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = (loadConfig().VOICE_LANG || 'pt-BR'); u.rate = parseFloat(loadConfig().VOICE_RATE) || 1; u.pitch = parseFloat(loadConfig().VOICE_PITCH) || 0.95;
+  u.onstart = () => { const e = $('#voiceStatus'); if (e) e.textContent = 'Falando...'; setMode('SPEAKING', '◉'); };
+  u.onend = () => { const e = $('#voiceStatus'); if (e) e.textContent = listening ? 'Ouvindo...' : 'Pronta.'; setMode(listening ? 'LISTENING' : 'PAGES', listening ? '◉' : '◎'); };
+  window.speechSynthesis.speak(u);
+}
+function stopSpeaking() { if ('speechSynthesis' in window) window.speechSynthesis.cancel(); }
+function startListening() {
+  if (!SpeechRecognition) { const e = $('#voiceStatus'); if (e) e.textContent = 'Sem reconhecimento de voz.'; return; }
+  if (!recognition) {
+    recognition = new SpeechRecognition();
+    recognition.lang = loadConfig().VOICE_LANG || 'pt-BR';
+    recognition.continuous = true; recognition.interimResults = false;
+    recognition.onstart = () => { listening = true; const e = $('#voiceStatus'); if (e) e.textContent = 'Ouvindo...'; setMode('LISTENING', '◉'); };
+    recognition.onend = () => { listening = false; const e = $('#voiceStatus'); if (e) e.textContent = 'Pronta.'; setMode('PAGES', '◎'); };
+    recognition.onerror = ev => { listening = false; const e = $('#voiceStatus'); if (e) e.textContent = 'Erro: ' + (ev.error || '?'); setMode('PAGES', '◎'); };
+    recognition.onresult = ev => { const t = ev.results[ev.results.length - 1][0].transcript || ''; if (ev.results[ev.results.length - 1].isFinal) { const ci = $('#commandInput'); if (ci) ci.value = t; runCommand(t, true); } };
+  }
+  try { recognition.start(); } catch {}
+}
+function stopListening() { if (recognition) { try { recognition.stop(); } catch {} } listening = false; }
+
+// ── UI ──
+function setMode(mode, mood) { const m = $('#mode'); const o = $('#mood'); if (m) m.textContent = mode; if (o) o.textContent = mood || '◎'; }
+function addMessage(html, type) { const w = $('#messages'); if (!w) return; const d = document.createElement('div'); d.className = 'msg ' + (type || 'assistant'); d.innerHTML = html; w.appendChild(d); w.scrollTop = w.scrollHeight; }
+function addTyping() { const w = $('#messages'); if (!w) return null; const d = document.createElement('div'); d.className = 'msg assistant typing'; d.innerHTML = '<span class="dot"></span><span class="dot"></span><span class="dot"></span>'; w.appendChild(d); w.scrollTop = w.scrollHeight; return d; }
+function removeTyping(el) { if (el && el.parentNode) el.parentNode.removeChild(el); }
+function esc(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+
+// ── AI CHAT ──
+async function callAI(baseUrl, key, model, msgs) {
+  const r = await fetch(baseUrl.replace(/\/$/, '') + '/chat/completions', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + key }, body: JSON.stringify({ model, messages: msgs, max_tokens: 2048, temperature: 0.7 }) });
+  if (!r.ok) { const t = await r.text(); throw new Error('HTTP ' + r.status + ': ' + t.slice(0, 200)); }
+  const d = await r.json(); return d.choices?.[0]?.message?.content || 'Sem resposta.';
+}
+async function aiChat(msg) {
+  const c = loadConfig(); const mem = loadMemory().slice(-10).map(m => ({ role: m.role === 'preference' ? 'system' : m.role, content: m.text }));
+  const sys = { role: 'system', content: 'Você é JARVIS, assistente virtual. Personalidade: elegante, calma, precisa, proativa. Responda em pt-BR. Seja direto.' };
+  const msgs = [sys, ...mem, { role: 'user', content: msg }];
+  if (c.AI_PROVIDER === 'openrouter' && c.OPENROUTER_API_KEY) return callAI('https://openrouter.ai/api/v1', c.OPENROUTER_API_KEY, c.OPENROUTER_MODEL, msgs);
+  if (c.AI_PROVIDER === 'openai' && c.OPENAI_API_KEY) return callAI(c.OPENAI_BASE_URL, c.OPENAI_API_KEY, c.OPENAI_MODEL, msgs);
+  if (c.AI_PROVIDER === 'nvidia' && c.NVIDIA_API_KEY) return callAI('https://integrate.api.nvidia.com/v1', c.NVIDIA_API_KEY, c.NVIDIA_MODEL, msgs);
+  return localReply(msg);
+}
+
+// ══════════════════════════════════════════════════════
+// LOCAL REPLY — TODAS as funções do projeto original
+// ══════════════════════════════════════════════════════
+function localReply(cmd) {
+  const text = (cmd || '').toLowerCase().trim();
   if (!text) return 'Estou ouvindo, Senhor.';
 
-  // Status
-  if (text.includes('status')) {
-    return 'Sistema operacional. Voz local ativa. Memória: ' + loadMemory().length + ' entradas. Lembretes: ' + listReminders().length + ' ativos.';
+  if (text === 'status' || text.includes('status') || text.includes('como você está') || text.includes('tudo bem'))
+    return 'Sistema operacional. Voz ativa. Memória: ' + loadMemory().length + ' entradas. Lembretes: ' + listReminders().length + ' ativos.';
+
+  if (text.includes('testar voz') || text.includes('testa voz') || text === 'fala' || text === 'voz' || text.includes('fale'))
+    return 'Voz online. Respondendo do navegador, Senhor.';
+
+  if (text.includes('parar voz') || text.includes('para voz') || text.includes('calar') || text.includes('silêncio') || text.includes('silencio') || text === 'stop') {
+    stopSpeaking(); stopListening(); return 'Voz pausada, Senhor.';
   }
 
-  // Testar voz
-  if (text.includes('testar voz') || text.includes('fala') || text.includes('voz')) {
-    return 'Voz online. Estou respondendo diretamente do navegador, Senhor.';
-  }
+  if (text.includes('youtube') || text.includes('abrir yt') || text === 'yt') { window.open('https://www.youtube.com', '_blank'); return 'Abrindo YouTube.'; }
 
-  // Abrir YouTube
-  if (text.includes('youtube') || text.includes('abrir yt')) {
-    window.open('https://www.youtube.com', '_blank');
-    return 'Abrindo YouTube, Senhor.';
-  }
+  const ytM = text.match(/(?:pesquisar|buscar|procurar|tocar|ouvir)\s+(?:no\s+)?youtube\s+(.+)/i) || text.match(/youtube\s+(.+)/i);
+  if (ytM) { window.open('https://www.youtube.com/results?search_query=' + encodeURIComponent(ytM[1].trim()), '_blank'); return 'Pesquisando "' + ytM[1].trim() + '" no YouTube.'; }
 
-  // Abrir navegador / pesquisa
+  const sM = text.match(/(?:pesquisar|buscar|procurar)\s+(?:na\s+)?(?:internet|google|web)?\s*(.+)/i);
+  if (sM) { const q = sM[1].replace(/^(sobre|por|de|do|da|o|a|os|as|um|uma)\s+/i, '').trim(); if (q) { window.open('https://www.google.com/search?q=' + encodeURIComponent(q), '_blank'); return 'Pesquisando "' + q + '".'; } }
   if (text.includes('pesquis') || text.includes('buscar') || text.includes('procurar')) {
-    const query = command.replace(/^(jarvis|por favor|,)\s*/i, '').replace(/pesquis(e|ar)|buscar|procurar|na internet|no google/gi, '').trim();
-    if (query) {
-      window.open('https://www.google.com/search?q=' + encodeURIComponent(query), '_blank');
-      return 'Pesquisando "' + query + '" na internet.';
-    }
-    window.open('https://www.google.com', '_blank');
-    return 'Abrindo navegador.';
+    const cl = cmd.replace(/^(jarvis|por favor|,)\s*/i, '').replace(/pesquis(e|ar)|buscar|procurar|na internet|no google/gi, '').trim();
+    if (cl.length > 2) { window.open('https://www.google.com/search?q=' + encodeURIComponent(cl), '_blank'); return 'Pesquisando "' + cl + '".'; }
+  }
+  if (text.includes('abrir navegador') || text.includes('abrir browser') || text.includes('abrir google') || text.includes('navegador')) { window.open('https://www.google.com', '_blank'); return 'Abrindo navegador.'; }
+
+  const oM = text.match(/(?:abrir|abre|abra)\s+(?:o|a|os|as)?\s*(.+)/i);
+  if (oM && !oM[1].includes('navegador') && !oM[1].includes('browser')) {
+    const app = oM[1].trim();
+    const prot = { 'calculadora': 'ms-calculator:', 'bloco de notas': 'notepad:', 'paint': 'ms-paint:', 'explorador': 'file:///C:/', 'documentos': 'file:///C:/Users/User/Documents', 'downloads': 'file:///C:/Users/User/Downloads', 'música': 'file:///C:/Users/User/Music', 'imagens': 'file:///C:/Users/User/Pictures', 'vídeos': 'file:///C:/Users/User/Videos' };
+    const p = prot[app];
+    if (p) { window.open(p, '_blank'); return 'Abrindo ' + app + '.'; }
+    if (app.length > 0) { window.open('file:///' + app, '_blank'); return 'Tentando abrir ' + app + '.'; }
   }
 
-  if (text.includes('abrir navegador') || text.includes('abrir browser')) {
-    window.open('https://www.google.com', '_blank');
-    return 'Abrindo navegador.';
+  if (text.includes('música') || text.includes('musica') || text.includes('tocar') || text.includes('ouvir') || text.includes('quero ouvir')) {
+    const am = text.match(/(?:tocar|ouvir|música|musica)\s+(.+)/i);
+    if (am) { window.open('https://www.youtube.com/results?search_query=' + encodeURIComponent(am[1].trim()), '_blank'); return 'Buscando: ' + am[1].trim() + '.'; }
+    window.open('https://music.youtube.com', '_blank'); return 'Abrindo YouTube Music.';
   }
 
-  // Lembretes
+  if (text.includes('calculadora') || text.includes('calcul') || text.includes('calcular')) { window.open('ms-calculator:', '_blank'); return 'Abrindo calculadora.'; }
+
   if (text.includes('lembre') || text.includes('lembrar') || text.includes('lembret')) {
-    if (text.includes('listar') || text.includes('mostrar') || text.includes('quais')) {
-      const r = listReminders();
-      if (!r.length) return 'Nenhum lembrete ativo.';
-      return 'Lembretes ativos:\n' + r.map(x => '• ' + x.text + (x.when ? ' (' + new Date(x.when).toLocaleString('pt-BR') + ')' : '')).join('\n');
+    if (text.includes('listar') || text.includes('mostrar') || text.includes('quais') || text.includes('ver')) {
+      const r = listReminders(); if (!r.length) return 'Nenhum lembrete ativo.';
+      return 'Lembretes:\n' + r.map(x => '• ' + x.text + (x.when ? ' (' + new Date(x.when).toLocaleString('pt-BR') + ')' : '')).join('\n');
     }
-    if (text.includes('limpar') || text.includes('apagar todos')) {
-      saveReminders([]);
-      return 'Todos os lembretes foram removidos.';
-    }
-    const parsed = parseReminder(command);
-    if (parsed) {
-      addReminder(parsed.text, parsed.when);
-      return 'Lembrete criado: "' + parsed.text + '"' + (parsed.when ? ' para ' + new Date(parsed.when).toLocaleString('pt-BR') : '') + '.';
-    }
-    return 'Para criar um lembrete, diga: "Lembre de [algo] em [tempo]".';
+    if (text.includes('limpar') || text.includes('apagar todos') || text.includes('remover todos')) { saveReminders([]); return 'Lembretes removidos.'; }
+    const p = parseReminder(cmd);
+    if (p) { addReminder(p.text, p.when); return 'Lembrete: "' + p.text + '"' + (p.when ? ' para ' + new Date(p.when).toLocaleString('pt-BR') : '') + '.'; }
+    return 'Diga: "Lembre de [algo] em 10 minutos" ou "Lembre de [algo] amanhã às 15:30".';
   }
 
-  // Memória
-  if (text.includes('memória') || text.includes('memoria') || text.includes('o que você sabe')) {
-    const mem = loadMemory();
-    if (!mem.length) return 'Minha memória está vazia.';
-    const recent = mem.slice(-5).map(m => m.role + ': ' + m.text.slice(0, 80)).join('\n');
-    return 'Últimas entradas de memória:\n' + recent;
+  if (text.includes('memória') || text.includes('memoria') || text.includes('o que você sabe') || text.includes('suas memórias')) {
+    const m = loadMemory(); if (!m.length) return 'Memória vazia.';
+    const prefs = m.filter(x => x.role === 'preference');
+    const conv = m.filter(x => x.role !== 'preference').slice(-5).map(x => x.role + ': ' + x.text.slice(0, 100)).join('\n');
+    return 'Conversas:\n' + conv + (prefs.length ? '\n\nPreferências:\n' + prefs.map(x => '• ' + x.text).join('\n') : '');
   }
+  if (text.includes('apagar memória') || text.includes('limpar memória') || text.includes('esquecer tudo')) { saveMemory([]); return 'Memória limpa.'; }
+  if (text.includes('esquecer prefer')) { saveMemory(loadMemory().filter(x => x.role !== 'preference')); return 'Preferências removidas.'; }
 
-  if (text.includes('apagar memória') || text.includes('limpar memória') || text.includes('esquecer')) {
-    saveMemory([]);
-    return 'Memória limpa, Senhor.';
-  }
+  const lM = cmd.match(/(?:aprenda que|lembre-se que|guarde que|saiba que|esqueça que)\s+(.+)/i);
+  if (lM) { const info = lM[1].trim(); if (text.includes('esque')) { saveMemory(loadMemory().filter(x => x.role !== 'preference' || x.text.toLowerCase() !== info.toLowerCase())); return 'Preferência removida.'; } appendMemory('preference', info); return 'Aprendi: ' + info; }
 
-  // Aprender / salvar preferência
-  if (text.includes('aprenda que') || text.includes('lembre-se que') || text.includes('guarde que')) {
-    const info = command.replace(/aprenda que|lembre-se que|guarde que/gi, '').trim();
-    appendMemory('preference', info);
-    return 'Aprendi: ' + info;
-  }
-
-  // Hora
-  if (text.includes('horas') || text.includes('que hora')) {
+  if ((text.includes('hor') && (text.includes('são') || text.includes('sao') || text.includes('é') || text.includes('e'))) || text === 'hora' || text === 'que horas')
     return 'Agora são ' + new Date().toLocaleTimeString('pt-BR') + '.';
-  }
-
-  // Data
-  if (text.includes('data') || text.includes('que dia')) {
+  if (text.includes('data') || (text.includes('dia') && (text.includes('hoje') || text.includes('é') || text.includes('e'))))
     return 'Hoje é ' + new Date().toLocaleDateString('pt-BR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) + '.';
-  }
+  if (text.includes('clima') || text.includes('tempo') || text.includes('temperatura') || text.includes('previsão') || text.includes('previsao'))
+    { window.open('https://www.google.com/search?q=previsão+do+tempo', '_blank'); return 'Abrindo previsão do tempo.'; }
 
-  // Opinião / conversa
-  if (text.includes('opinião') || text.includes('o que você acha') || text.includes('converse')) {
-    return 'Entendo seu interesse, Senhor. Com uma API de IA configurada, posso dar respostas muito mais completas. Configure em Config > API Key.';
-  }
+  if (text.includes('opinião') || text.includes('opinao') || text.includes('o que você acha') || text.includes('o que voce acha') || text.includes('converse') || text.includes('papo'))
+    return 'Configure uma API de IA em Config para respostas completas.';
 
-  // Ajuda
-  if (text.includes('ajuda') || text.includes('help') || text.includes('o que você faz') || text.includes('comandos')) {
-    return `Posso fazer:
-• Pesquisar na internet ("pesquisar [tema]")
-• Abrir YouTube
-• Criar lembretes ("lembre de X em 10 min")
-• Listar lembretes
-• Lembrar preferências ("aprenda que...")
-• Informar hora e data
-• Chat com IA (configure API em Config)
-• Controle por voz (clique Falar)`;
-  }
+  if (text.includes('ajuda') || text.includes('help') || text.includes('o que você faz') || text.includes('o que voce faz') || text.includes('comandos') || text === 'menu' || text === 'opções' || text === 'opcoes')
+    return `Comandos de voz:
+• "Pesquisar [tema]" / "Abrir YouTube"
+• "Abrir calculadora/bloco de notas/explorador"
+• "Lembre de [algo] em 10 min / amanhã às 15:30"
+• "Listar lembretes" / "Limpar lembretes"
+• "Que horas são?" / "Que dia é hoje?"
+• "Aprenda que [preferência]"
+• "Minha memória" / "Limpar memória"
+• "Status" / "Testar voz" / "Parar voz"
+• "Previsão do tempo"
+• "Modo seguro"
+• "Limpar chat"
+• Chat livre (configure API em Config)`;
 
-  return 'Recebi seu comando: "' + command + '". Configure uma API de IA em Config para respostas completas.';
+  if (text.includes('modo seguro') || text.includes('safe mode')) { safeMode = !safeMode; return safeMode ? 'Modo seguro ativado.' : 'Modo seguro desativado.'; }
+  if (text.includes('limpar chat') || text.includes('limpar conversa') || text.includes('limpar mensagens')) { const m = $('#messages'); if (m) m.innerHTML = ''; return 'Chat limpo.'; }
+
+  if (text.includes('hermes') && !text.includes('envie para hermes')) return 'Hermes: orquestrador de agentes. Configure URL em Config.';
+  if (text.includes('openclaw') && !text.includes('envie para openclaw')) return 'OpenClaw: executor local. Configure URL em Config.';
+  if (text.includes('mcp') && !text.includes('envie para mcp')) return 'MCP: Model Context Protocol. Configure URL em Config.';
+
+  return 'Recebi: "' + cmd + '". Configure API em Config para respostas completas.';
 }
 
-// ══════════════════════════════════════════════════════
-// ORCHESTRATOR STATUS
-// ══════════════════════════════════════════════════════
-
-async function checkOrchestrator(url, timeout = 2000) {
-  if (!url) return { available: false };
+// ── ORCHESTRATOR ──
+async function checkOrch(url, t = 2000) {
+  if (!url) return false;
+  try { const c = new AbortController(); setTimeout(() => c.abort(), t); const r = await fetch(url, { signal: c.signal }); return r.ok; } catch { return false; }
+}
+async function updateOrch() {
+  const c = loadConfig(); const r = {};
+  if (c.HERMES_ENABLED) r.hermes = await checkOrch(c.HERMES_URL + '/api/status');
+  if (c.OPENCLAW_ENABLED) r.openclaw = await checkOrch(c.OPENCLAW_URL + '/api/status');
+  if (c.MCP_ENABLED) r.mcp = await checkOrch(c.MCP_URL);
+  const e = $('#orchestratorStatus'); if (e) {
+    const p = [];
+    if (r.hermes !== undefined) p.push('Hermes: ' + (r.hermes ? '🟢' : '🔴'));
+    if (r.openclaw !== undefined) p.push('OpenClaw: ' + (r.openclaw ? '🟢' : '🔴'));
+    if (r.mcp !== undefined) p.push('MCP: ' + (r.mcp ? '🟢' : '🔴'));
+    e.textContent = p.length ? p.join(' • ') : 'Não configurado.';
+  }
+  return r;
+}
+async function sendOrch(target, cmd) {
+  const c = loadConfig(); const urls = { hermes: c.HERMES_URL, openclaw: c.OPENCLAW_URL, mcp: c.MCP_URL };
+  const url = urls[target]; if (!url) return target + ' não configurado.';
   try {
-    const ctrl = new AbortController();
-    const id = setTimeout(() => ctrl.abort(), timeout);
-    const res = await fetch(url, { signal: ctrl.signal });
-    clearTimeout(id);
-    return { available: true, status: res.status };
-  } catch {
-    return { available: false };
-  }
+    const r = await fetch(url + '/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: cmd }) });
+    if (r.ok) { const d = await r.json(); return d.text || d.reply || 'Resposta de ' + target + '.'; }
+    return target + ' erro ' + r.status + '.';
+  } catch { return target + ' indisponível.'; }
 }
 
-async function updateOrchestratorStatus() {
-  const cfg = loadConfig();
-  const results = {};
-
-  if (cfg.HERMES_ENABLED) {
-    results.hermes = await checkOrchestrator(cfg.HERMES_URL + '/api/status');
-  }
-  if (cfg.OPENCLAW_ENABLED) {
-    results.openclaw = await checkOrchestrator(cfg.OPENCLAW_URL + '/api/status');
-  }
-  if (cfg.MCP_ENABLED) {
-    results.mcp = await checkOrchestrator(cfg.MCP_URL);
-  }
-
-  const orchEl = $('#orchestratorStatus');
-  if (orchEl) {
-    const parts = [];
-    if (results.hermes) parts.push('Hermes: ' + (results.hermes.available ? '🟢 Online' : '🔴 Offline'));
-    if (results.openclaw) parts.push('OpenClaw: ' + (results.openclaw.available ? '🟢 Online' : '🔴 Offline'));
-    if (results.mcp) parts.push('MCP: ' + (results.mcp.available ? '🟢 Online' : '🔴 Offline'));
-    orchEl.innerHTML = parts.length ? parts.join(' • ') : 'Orquestradores não configurados.';
-  }
-
-  return results;
-}
-
-// ══════════════════════════════════════════════════════
-// COMMAND PROCESSOR
-// ══════════════════════════════════════════════════════
-
-async function runCommand(command, fromVoice) {
-  const prompt = String(command || '').trim();
-  addMessage('<b>Você:</b> ' + escapeHtml(prompt), 'user');
-  if (!prompt) {
-    const reply = 'Estou ouvindo, Senhor.';
-    addMessage('<b>JARVIS:</b> ' + reply, 'assistant');
-    speak(reply);
-    return;
-  }
-
+// ── COMMAND PROCESSOR ──
+async function runCommand(cmd, fromVoice) {
+  const prompt = String(cmd || '').trim();
+  addMessage('<b>Você:</b> ' + esc(prompt), 'user');
+  if (!prompt) { addMessage('<b>JARVIS:</b> Estou ouvindo.', 'assistant'); speak('Estou ouvindo.'); return; }
   appendMemory('user', prompt);
   setMode('THINKING', '◌');
   const typing = addTyping();
-
   try {
-    // Check for orchestrator commands
     const lower = prompt.toLowerCase();
-    if (lower.startsWith('hermes:') || lower.startsWith('hermes ')) {
-      removeTyping(typing);
-      const reply = await sendOrchestratorCommand('hermes', prompt.replace(/^hermes[:\s]*/i, ''));
-      addMessage('<b>JARVIS:</b> ' + reply, 'assistant');
-      appendMemory('assistant', reply);
-      speak(reply);
-      return;
-    }
-    if (lower.startsWith('openclaw:') || lower.startsWith('openclaw ')) {
-      removeTyping(typing);
-      const reply = await sendOrchestratorCommand('openclaw', prompt.replace(/^openclaw[:\s]*/i, ''));
-      addMessage('<b>JARVIS:</b> ' + reply, 'assistant');
-      appendMemory('assistant', reply);
-      speak(reply);
-      return;
-    }
-    if (lower.startsWith('mcp:') || lower.startsWith('mcp ')) {
-      removeTyping(typing);
-      const reply = await sendOrchestratorCommand('mcp', prompt.replace(/^mcp[:\s]*/i, ''));
-      addMessage('<b>JARVIS:</b> ' + reply, 'assistant');
-      appendMemory('assistant', reply);
-      speak(reply);
-      return;
-    }
-
-    // Try AI first, fall back to local
     let reply;
-    const cfg = loadConfig();
-    const hasAI = (cfg.AI_PROVIDER === 'openrouter' && cfg.OPENROUTER_API_KEY) ||
-                  (cfg.AI_PROVIDER === 'openai' && cfg.OPENAI_API_KEY) ||
-                  (cfg.AI_PROVIDER === 'nvidia' && cfg.NVIDIA_API_KEY);
-
-    if (hasAI) {
-      try {
-        reply = await aiChat(prompt);
-      } catch (err) {
-        reply = 'Erro na API: ' + err.message + '. Usando resposta local.\n\n' + localReply(prompt);
-      }
-    } else {
-      reply = localReply(prompt);
-    }
-
+    if (lower.startsWith('hermes:') || lower.startsWith('hermes ')) reply = await sendOrch('hermes', prompt.replace(/^hermes[:\s]*/i, ''));
+    else if (lower.startsWith('openclaw:') || lower.startsWith('openclaw ')) reply = await sendOrch('openclaw', prompt.replace(/^openclaw[:\s]*/i, ''));
+    else if (lower.startsWith('mcp:') || lower.startsWith('mcp ')) reply = await sendOrch('mcp', prompt.replace(/^mcp[:\s]*/i, ''));
+    else reply = await aiChat(prompt);
     removeTyping(typing);
     addMessage('<b>JARVIS:</b> ' + reply, 'assistant');
     appendMemory('assistant', reply);
@@ -565,365 +259,86 @@ async function runCommand(command, fromVoice) {
   } catch (err) {
     removeTyping(typing);
     const reply = 'Erro: ' + err.message;
-    addMessage('<b>JARVIS:</b> ' + reply, 'assistant');
-    speak(reply);
-  } finally {
-    setMode(listening ? 'LISTENING' : 'PAGES', listening ? '◉' : '◎');
-  }
+    addMessage('<b>JARVIS:</b> ' + reply, 'assistant'); speak(reply);
+  } finally { setMode(listening ? 'LISTENING' : 'PAGES', listening ? '◉' : '◎'); }
 }
 
-async function sendOrchestratorCommand(target, command) {
-  const cfg = loadConfig();
-  const urls = { hermes: cfg.HERMES_URL, openclaw: cfg.OPENCLAW_URL, mcp: cfg.MCP_URL };
-  const url = urls[target];
-  if (!url) return target + ' não está configurado.';
+// ── CONFIG PANEL ──
+function renderConfig() {
+  const p = $('#configPanel'); if (!p) return;
+  const c = loadConfig();
+  const provs = [{ v: 'local', l: 'Local' }, { v: 'openrouter', l: 'OpenRouter' }, { v: 'openai', l: 'OpenAI' }, { v: 'nvidia', l: 'NVIDIA NIM' }];
+  p.innerHTML = `<div class="config-section"><h4>🤖 Provedor de IA</h4><select id="cfgProvider">${provs.map(x => `<option value="${x.v}" ${c.AI_PROVIDER === x.v ? 'selected' : ''}>${x.l}</option>`).join('')}</select></div>
+  <div class="config-section" id="cfgOR" style="${c.AI_PROVIDER !== 'openrouter' ? 'display:none' : ''}"><h4>🌐 OpenRouter</h4><input id="cfgORK" type="password" placeholder="sk-or-..." value="${c.OPENROUTER_API_KEY}" /><input id="cfgORM" placeholder="Modelo" value="${c.OPENROUTER_MODEL}" /></div>
+  <div class="config-section" id="cfgOA" style="${c.AI_PROVIDER !== 'openai' ? 'display:none' : ''}"><h4>🧠 OpenAI</h4><input id="cfgOAK" type="password" placeholder="sk-..." value="${c.OPENAI_API_KEY}" /><input id="cfgOAM" placeholder="Modelo" value="${c.OPENAI_MODEL}" /><input id="cfgOAB" placeholder="Base URL" value="${c.OPENAI_BASE_URL}" /></div>
+  <div class="config-section" id="cfgNV" style="${c.AI_PROVIDER !== 'nvidia' ? 'display:none' : ''}"><h4>⚡ NVIDIA</h4><input id="cfgNVK" type="password" placeholder="nvapi-..." value="${c.NVIDIA_API_KEY}" /><input id="cfgNVM" placeholder="Modelo" value="${c.NVIDIA_MODEL}" /></div>
+  <div class="config-section"><h4>🎙️ Voz</h4><label>Idioma: <input id="cfgVL" value="${c.VOICE_LANG}" style="width:80px" /></label><label>Velocidade: <input id="cfgVR" type="range" min="0.5" max="2" step="0.1" value="${c.VOICE_RATE}" /><span id="cfgVRV">${c.VOICE_RATE}</span></label><label>Tom: <input id="cfgVP" type="range" min="0.5" max="2" step="0.05" value="${c.VOICE_PITCH}" /><span id="cfgVPV">${c.VOICE_PITCH}</span></label></div>
+  <div class="config-section"><h4>🔗 Orquestradores</h4><label>Hermes: <input id="cfgHU" value="${c.HERMES_URL}" /></label><label>OpenClaw: <input id="cfgOU" value="${c.OPENCLAW_URL}" /></label><label>MCP: <input id="cfgMU" value="${c.MCP_URL}" /></label></div>
+  <div class="config-section"><h4>🛡️ Segurança</h4><select id="cfgAP"><option value="once" ${c.APPROVAL_POLICY === 'once' ? 'selected' : ''}>Aprovar uma vez</option><option value="always" ${c.APPROVAL_POLICY === 'always' ? 'selected' : ''}>Sempre aprovar</option><option value="off" ${c.APPROVAL_POLICY === 'off' ? 'selected' : ''}>Desativado</option></select></div>
+  <div class="config-actions"><button id="cfgSave" class="btn primary">Salvar</button><button id="cfgTest" class="btn">Testar API</button><button id="cfgClear" class="btn danger">Limpar Chaves</button></div>
+  <div id="cfgResult" class="config-test-result"></div>`;
 
-  try {
-    const res = await fetch(url + '/api/chat', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ message: command })
-    });
-    if (res.ok) {
-      const data = await res.json();
-      return data.text || data.reply || 'Resposta recebida de ' + target + '.';
-    }
-    return target + ' respondeu com erro ' + res.status + '.';
-  } catch {
-    return target + ' não está disponível. Verifique se está rodando.';
-  }
-}
+  const ps = $('#cfgProvider'); if (ps) ps.addEventListener('change', () => { const v = ps.value; document.getElementById('cfgOR').style.display = v === 'openrouter' ? '' : 'none'; document.getElementById('cfgOA').style.display = v === 'openai' ? '' : 'none'; document.getElementById('cfgNV').style.display = v === 'nvidia' ? '' : 'none'; });
+  const rv = $('#cfgVR'); const rvv = $('#cfgVRV'); if (rv && rvv) rv.addEventListener('input', () => rvv.textContent = rv.value);
+  const pv = $('#cfgVP'); const pvv = $('#cfgVPV'); if (pv && pvv) pv.addEventListener('input', () => pvv.textContent = pv.value);
 
-function escapeHtml(text) {
-  const d = document.createElement('div');
-  d.textContent = text;
-  return d.innerHTML;
-}
-
-// ══════════════════════════════════════════════════════
-// CONFIG PANEL
-// ══════════════════════════════════════════════════════
-
-function renderConfigPanel() {
-  const cfg = loadConfig();
-  const panel = $('#configPanel');
-  if (!panel) return;
-
-  const providers = [
-    { value: 'local', label: 'Local (sem IA)' },
-    { value: 'openrouter', label: 'OpenRouter' },
-    { value: 'openai', label: 'OpenAI' },
-    { value: 'nvidia', label: 'NVIDIA NIM' }
-  ];
-
-  panel.innerHTML = `
-    <div class="config-section">
-      <h4>🤖 Provedor de IA</h4>
-      <select id="cfgProvider">
-        ${providers.map(p => `<option value="${p.value}" ${cfg.AI_PROVIDER === p.value ? 'selected' : ''}>${p.label}</option>`).join('')}
-      </select>
-    </div>
-    <div class="config-section" id="openrouterConfig" style="${cfg.AI_PROVIDER !== 'openrouter' ? 'display:none' : ''}">
-      <h4>🌐 OpenRouter</h4>
-      <input id="cfgOpenRouterKey" type="password" placeholder="sk-or-..." value="${cfg.OPENROUTER_API_KEY}" />
-      <input id="cfgOpenRouterModel" placeholder="Modelo" value="${cfg.OPENROUTER_MODEL}" />
-    </div>
-    <div class="config-section" id="openaiConfig" style="${cfg.AI_PROVIDER !== 'openai' ? 'display:none' : ''}">
-      <h4>🧠 OpenAI</h4>
-      <input id="cfgOpenAIKey" type="password" placeholder="sk-..." value="${cfg.OPENAI_API_KEY}" />
-      <input id="cfgOpenAIModel" placeholder="Modelo" value="${cfg.OPENAI_MODEL}" />
-      <input id="cfgOpenAIBaseUrl" placeholder="Base URL" value="${cfg.OPENAI_BASE_URL}" />
-    </div>
-    <div class="config-section" id="nvidiaConfig" style="${cfg.AI_PROVIDER !== 'nvidia' ? 'display:none' : ''}">
-      <h4>⚡ NVIDIA NIM</h4>
-      <input id="cfgNvidiaKey" type="password" placeholder="nvapi-..." value="${cfg.NVIDIA_API_KEY}" />
-      <input id="cfgNvidiaModel" placeholder="Modelo" value="${cfg.NVIDIA_MODEL}" />
-    </div>
-    <div class="config-section">
-      <h4>🎙️ Voz</h4>
-      <label>Idioma: <input id="cfgVoiceLang" value="${cfg.VOICE_LANG}" style="width:80px" /></label>
-      <label>Velocidade: <input id="cfgVoiceRate" type="range" min="0.5" max="2" step="0.1" value="${cfg.VOICE_RATE}" /><span id="cfgVoiceRateVal">${cfg.VOICE_RATE}</span></label>
-      <label>Tom: <input id="cfgVoicePitch" type="range" min="0.5" max="2" step="0.05" value="${cfg.VOICE_PITCH}" /><span id="cfgVoicePitchVal">${cfg.VOICE_PITCH}</span></label>
-    </div>
-    <div class="config-section">
-      <h4>🔗 Orquestradores (localhost)</h4>
-      <label>Hermes URL: <input id="cfgHermesUrl" value="${cfg.HERMES_URL}" /></label>
-      <label>OpenClaw URL: <input id="cfgOpenClawUrl" value="${cfg.OPENCLAW_URL}" /></label>
-      <label>MCP URL: <input id="cfgMcpUrl" value="${cfg.MCP_URL}" /></label>
-    </div>
-    <div class="config-section">
-      <h4>🛡️ Segurança</h4>
-      <select id="cfgApprovalPolicy">
-        <option value="once" ${cfg.APPROVAL_POLICY === 'once' ? 'selected' : ''}>Aprovar uma vez</option>
-        <option value="always" ${cfg.APPROVAL_POLICY === 'always' ? 'selected' : ''}>Sempre aprovar</option>
-        <option value="off" ${cfg.APPROVAL_POLICY === 'off' ? 'selected' : ''}>Desativado</option>
-      </select>
-    </div>
-    <div class="config-actions">
-      <button id="cfgSave" class="btn primary">Salvar Configuração</button>
-      <button id="cfgTest" class="btn">Testar API</button>
-      <button id="cfgClearKeys" class="btn danger">Limpar Chaves</button>
-    </div>
-    <div id="cfgTestResult" class="config-test-result"></div>
-  `;
-
-  // Provider toggle
-  const provSel = $('#cfgProvider');
-  if (provSel) provSel.addEventListener('change', () => {
-    const v = provSel.value;
-    const sections = { openrouter: 'openrouterConfig', openai: 'openaiConfig', nvidia: 'nvidiaConfig' };
-    for (const [key, id] of Object.entries(sections)) {
-      const el = document.getElementById(id);
-      if (el) el.style.display = key === v ? '' : 'none';
-    }
-  });
-
-  // Voice sliders
-  const rateEl = $('#cfgVoiceRate');
-  const rateVal = $('#cfgVoiceRateVal');
-  if (rateEl && rateVal) rateEl.addEventListener('input', () => rateVal.textContent = rateEl.value);
-  const pitchEl = $('#cfgVoicePitch');
-  const pitchVal = $('#cfgVoicePitchVal');
-  if (pitchEl && pitchVal) pitchEl.addEventListener('input', () => pitchVal.textContent = pitchEl.value);
-
-  // Save
   $('#cfgSave')?.addEventListener('click', () => {
-    const provider = $('#cfgProvider')?.value || 'local';
-    saveConfig({
-      AI_PROVIDER: provider,
-      OPENROUTER_API_KEY: $('#cfgOpenRouterKey')?.value?.trim() || '',
-      OPENROUTER_MODEL: $('#cfgOpenRouterModel')?.value?.trim() || 'openai/gpt-4o-mini',
-      OPENAI_API_KEY: $('#cfgOpenAIKey')?.value?.trim() || '',
-      OPENAI_MODEL: $('#cfgOpenAIModel')?.value?.trim() || 'gpt-4o-mini',
-      OPENAI_BASE_URL: $('#cfgOpenAIBaseUrl')?.value?.trim() || 'https://api.openai.com/v1',
-      NVIDIA_API_KEY: $('#cfgNvidiaKey')?.value?.trim() || '',
-      NVIDIA_MODEL: $('#cfgNvidiaModel')?.value?.trim() || 'meta/llama-3.1-70b-instruct',
-      VOICE_LANG: $('#cfgVoiceLang')?.value?.trim() || 'pt-BR',
-      VOICE_RATE: parseFloat($('#cfgVoiceRate')?.value) || 1.0,
-      VOICE_PITCH: parseFloat($('#cfgVoicePitch')?.value) || 0.95,
-      HERMES_URL: $('#cfgHermesUrl')?.value?.trim() || 'http://localhost:8001',
-      OPENCLAW_URL: $('#cfgOpenClawUrl')?.value?.trim() || 'http://localhost:8675',
-      MCP_URL: $('#cfgMcpUrl')?.value?.trim() || 'http://localhost:3001/mcp',
-      APPROVAL_POLICY: $('#cfgApprovalPolicy')?.value || 'once'
-    });
-    addMessage('<b>JARVIS:</b> Configuração salva com sucesso.', 'assistant');
-    speak('Configuração salva.');
+    saveConfig({ AI_PROVIDER: $('#cfgProvider')?.value || 'local', OPENROUTER_API_KEY: $('#cfgORK')?.value?.trim() || '', OPENROUTER_MODEL: $('#cfgORM')?.value?.trim() || 'openai/gpt-4o-mini', OPENAI_API_KEY: $('#cfgOAK')?.value?.trim() || '', OPENAI_MODEL: $('#cfgOAM')?.value?.trim() || 'gpt-4o-mini', OPENAI_BASE_URL: $('#cfgOAB')?.value?.trim() || 'https://api.openai.com/v1', NVIDIA_API_KEY: $('#cfgNVK')?.value?.trim() || '', NVIDIA_MODEL: $('#cfgNVM')?.value?.trim() || 'meta/llama-3.1-70b-instruct', VOICE_LANG: $('#cfgVL')?.value?.trim() || 'pt-BR', VOICE_RATE: parseFloat($('#cfgVR')?.value) || 1, VOICE_PITCH: parseFloat($('#cfgVP')?.value) || 0.95, HERMES_URL: $('#cfgHU')?.value?.trim() || 'http://localhost:8001', OPENCLAW_URL: $('#cfgOU')?.value?.trim() || 'http://localhost:8675', MCP_URL: $('#cfgMU')?.value?.trim() || 'http://localhost:3001/mcp', APPROVAL_POLICY: $('#cfgAP')?.value || 'once' });
+    addMessage('<b>JARVIS:</b> Configuração salva.', 'assistant'); speak('Configuração salva.');
   });
 
-  // Test
   $('#cfgTest')?.addEventListener('click', async () => {
-    const resultEl = $('#cfgTestResult');
-    if (resultEl) resultEl.textContent = 'Testando...';
-    try {
-      const provider = $('#cfgProvider')?.value || 'local';
-      if (provider === 'local') {
-        if (resultEl) resultEl.textContent = '✅ Modo local ativo (sem API).';
-        return;
-      }
-      const key = provider === 'openrouter' ? $('#cfgOpenRouterKey')?.value :
-                  provider === 'openai' ? $('#cfgOpenAIKey')?.value :
-                  $('#cfgNvidiaKey')?.value;
-      if (!key) {
-        if (resultEl) resultEl.textContent = '❌ Chave de API não configurada.';
-        return;
-      }
-      const reply = await aiChat('Responda apenas: OK');
-      if (resultEl) resultEl.textContent = '✅ API funcionando! Resposta: ' + reply.slice(0, 100);
-    } catch (err) {
-      if (resultEl) resultEl.textContent = '❌ Erro: ' + err.message;
-    }
+    const r = $('#cfgResult'); if (r) r.textContent = 'Testando...';
+    try { const prov = $('#cfgProvider')?.value || 'local'; if (prov === 'local') { if (r) r.textContent = '✅ Modo local.'; return; }
+      const key = prov === 'openrouter' ? $('#cfgORK')?.value : prov === 'openai' ? $('#cfgOAK')?.value : $('#cfgNVK')?.value;
+      if (!key) { if (r) r.textContent = '❌ Sem chave.'; return; }
+      const reply = await aiChat('Responda: OK'); if (r) r.textContent = '✅ OK! Resposta: ' + reply.slice(0, 80);
+    } catch (e) { if (r) r.textContent = '❌ ' + e.message; }
   });
 
-  // Clear keys
-  $('#cfgClearKeys')?.addEventListener('click', () => {
-    if (confirm('Remover todas as chaves de API?')) {
-      saveConfig({ OPENAI_API_KEY: '', OPENROUTER_API_KEY: '', NVIDIA_API_KEY: '' });
-      addMessage('<b>JARVIS:</b> Chaves removidas.', 'assistant');
-      renderConfigPanel();
-    }
-  });
+  $('#cfgClear')?.addEventListener('click', () => { if (confirm('Remover chaves?')) { saveConfig({ OPENAI_API_KEY: '', OPENROUTER_API_KEY: '', NVIDIA_API_KEY: '' }); addMessage('<b>JARVIS:</b> Chaves removidas.', 'assistant'); renderConfig(); } });
 }
 
 // ══════════════════════════════════════════════════════
-// MAIN APP RENDER
+// MAIN RENDER
 // ══════════════════════════════════════════════════════
-
 function renderApp() {
-  const cfg = loadConfig();
-  const hasAI = (cfg.AI_PROVIDER === 'openrouter' && cfg.OPENROUTER_API_KEY) ||
-                (cfg.AI_PROVIDER === 'openai' && cfg.OPENAI_API_KEY) ||
-                (cfg.AI_PROVIDER === 'nvidia' && cfg.NVIDIA_API_KEY);
+  const c = loadConfig();
+  const hasAI = (c.AI_PROVIDER === 'openrouter' && c.OPENROUTER_API_KEY) || (c.AI_PROVIDER === 'openai' && c.OPENAI_API_KEY) || (c.AI_PROVIDER === 'nvidia' && c.NVIDIA_API_KEY);
 
-  APP.innerHTML = `
-  <header class="topbar">
-    <div class="brand">J·A·R·V·I·S</div>
-    <nav>
-      <button class="tab active" data-tab="pages">Pages</button>
-      <button class="tab" data-tab="config">Config</button>
-    </nav>
-    <div class="clock" id="clock">--:--:--</div>
-  </header>
-
+  APP.innerHTML = `<header class="topbar"><div class="brand">J·A·R·V·I·S</div><nav><button class="tab active" data-tab="pages">Pages</button><button class="tab" data-tab="config">Config</button></nav><div class="clock" id="clock">--:--:--</div></header>
   <section class="layout">
-    <!-- LEFT PANEL -->
-    <aside class="panel left" id="leftPanel">
-      <h3>◉ STATUS</h3>
-      <div id="status" class="orchestrator">${hasAI ? 'IA configurada: ' + cfg.AI_PROVIDER : 'Modo local. Configure uma API em Config.'}</div>
-      <h3>◉ VOZ</h3>
-      <div id="voiceStatus" class="orchestrator">Pronta para síntese de voz.</div>
-      <h3>◉ MEMÓRIA</h3>
-      <div id="memoryStatus" class="orchestrator">${loadMemory().length} entradas • ${listReminders().length} lembretes</div>
-    </aside>
-
-    <!-- CENTER -->
+    <aside class="panel left"><h3>◉ STATUS</h3><div id="status" class="orchestrator">${hasAI ? 'IA: ' + c.AI_PROVIDER : 'Modo local. Configure API em Config.'}</div><h3>◉ VOZ</h3><div id="voiceStatus" class="orchestrator">Pronta.</div><h3>◉ MEMÓRIA</h3><div id="memStatus" class="orchestrator">${loadMemory().length} entradas • ${listReminders().length} lembretes</div></aside>
     <main class="center">
-      <!-- PAGES TAB -->
-      <section class="screen tabpage active" id="tab-pages">
-        <div class="orb-wrap">
-          <div class="orb"><div class="face"><h1 id="mood">◎</h1><p id="mode">PAGES</p></div></div>
-        </div>
-        <div class="chatbox" id="messages"></div>
-        <div class="composer">
-          <input id="commandInput" placeholder="Diga ou digite seu comando para o JARVIS" />
-          <button id="sendCommand">Enviar</button>
-        </div>
-        <div class="quick">
-          <button id="testVoice">🔊 Testar voz</button>
-          <button id="startVoice">🎙️ Falar</button>
-          <button id="stopVoice" style="display:none">⏹️ Parar voz</button>
-          <button id="openYouTube">📺 YouTube</button>
-          <btn id="openBrowser">🌐 Pesquisar</btn>
-        </div>
-        <p class="muted">Voz local ativa. Chat com IA via API do navegador. Configure em Config para IA completa.</p>
-      </section>
-
-      <!-- CONFIG TAB -->
-      <section class="screen tabpage" id="tab-config">
-        <h2>⚙️ Configuração</h2>
-        <div id="configPanel"></div>
-      </section>
+      <section class="screen tabpage active" id="tab-pages"><div class="orb-wrap"><div class="orb"><div class="face"><h1 id="mood">◎</h1><p id="mode">PAGES</p></div></div></div><div class="chatbox" id="messages"></div><div class="composer"><input id="commandInput" placeholder="Diga ou digite seu comando..." /><button id="sendCommand">Enviar</button></div><div class="quick"><button id="testVoice">🔊 Testar voz</button><button id="startVoice">🎙️ Falar</button><button id="stopVoice" style="display:none">⏹️ Parar</button><button id="openYouTube">📺 YouTube</button><button id="openBrowser">🌐 Pesquisar</button></div><p class="muted">Voz local ativa. Chat com IA via API do navegador. Configure em Config.</p></section>
+      <section class="screen tabpage" id="tab-config"><h2>⚙️ Configuração</h2><div id="configPanel"></div></section>
     </main>
-
-    <!-- RIGHT PANEL -->
-    <aside class="panel right">
-      <h3>▸ OBSERVAÇÕES</h3>
-      <div class="orchestrator">
-        <p><b>Pages:</b> ativo para acesso público.</p>
-        <p><b>Página pública do JARVIS pronta.</b></p>
-        <p>A voz local já pode ser testada.</p>
-      </div>
-      <h3>▸ ORQUESTRADOR</h3>
-      <div id="orchestratorStatus" class="orchestrator">Verificando...</div>
-      <h3>▸ APROVAÇÕES</h3>
-      <div id="approvalsList" class="orchestrator">Nenhuma pendente.</div>
-    </aside>
+    <aside class="panel right"><h3>▸ OBSERVAÇÕES</h3><div class="orchestrator"><p><b>Pages:</b> ativo.</p><p><b>JARVIS pronto.</b></p><p>Voz local ativa.</p></div><h3>▸ ORQUESTRADOR</h3><div id="orchestratorStatus" class="orchestrator">Verificando...</div></aside>
   </section>`;
 
-  // Tab switching
-  document.querySelectorAll('.tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-      document.querySelectorAll('.tabpage').forEach(p => p.classList.remove('active'));
-      tab.classList.add('active');
-      const target = document.getElementById('tab-' + tab.dataset.tab);
-      if (target) target.classList.add('active');
-      if (tab.dataset.tab === 'config') renderConfigPanel();
-    });
-  });
-
+  // Tabs
+  document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => { document.querySelectorAll('.tab').forEach(x => x.classList.remove('active')); document.querySelectorAll('.tabpage').forEach(x => x.classList.remove('active')); t.classList.add('active'); const el = document.getElementById('tab-' + t.dataset.tab); if (el) el.classList.add('active'); if (t.dataset.tab === 'config') renderConfig(); }));
   // Clock
-  function tick() {
-    const el = $('#clock');
-    if (el) el.textContent = new Date().toLocaleTimeString('pt-BR');
-  }
-  setInterval(tick, 1000);
-  tick();
-
-  // Send command
-  $('#sendCommand')?.addEventListener('click', () => {
-    const input = $('#commandInput');
-    if (input) { runCommand(input.value.trim()); input.value = ''; }
-  });
-  $('#commandInput')?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      const input = $('#commandInput');
-      if (input) { runCommand(input.value.trim()); input.value = ''; }
-    }
-  });
-
-  // Voice buttons
-  $('#testVoice')?.addEventListener('click', () => {
-    addMessage('<b>Você:</b> testar voz', 'user');
-    const reply = 'Voz online. Estou respondendo diretamente do navegador, Senhor.';
-    addMessage('<b>JARVIS:</b> ' + reply, 'assistant');
-    speak(reply);
-  });
-
-  $('#startVoice')?.addEventListener('click', () => {
-    startListening();
-    $('#startVoice').style.display = 'none';
-    $('#stopVoice').style.display = '';
-  });
-
-  $('#stopVoice')?.addEventListener('click', () => {
-    stopListening();
-    $('#startVoice').style.display = '';
-    $('#stopVoice').style.display = 'none';
-  });
-
-  // Quick actions
-  $('#openYouTube')?.addEventListener('click', () => {
-    addMessage('<b>Você:</b> Abrir YouTube', 'user');
-    window.open('https://www.youtube.com', '_blank');
-    const reply = 'Abrindo YouTube, Senhor.';
-    addMessage('<b>JARVIS:</b> ' + reply, 'assistant');
-    speak(reply);
-  });
-
-  $('#openBrowser')?.addEventListener('click', () => {
-    const query = prompt('Pesquisar na internet:');
-    if (query) {
-      addMessage('<b>Você:</b> Pesquisar: ' + query, 'user');
-      window.open('https://www.google.com/search?q=' + encodeURIComponent(query), '_blank');
-      const reply = 'Pesquisando "' + query + '".';
-      addMessage('<b>JARVIS:</b> ' + reply, 'assistant');
-      speak(reply);
-    }
-  });
-
-  // Check orchestrator status periodically
-  updateOrchestratorStatus();
-  setInterval(updateOrchestratorStatus, 30000);
-
-  // Check due reminders periodically
-  setInterval(() => {
-    const due = dueReminders();
-    if (due.length) {
-      const text = 'Lembrete: ' + due[0].text;
-      addMessage('<b>JARVIS:</b> ⏰ ' + text, 'assistant');
-      speak(text);
-      // Mark as done
-      const r = loadReminders();
-      const item = r.find(x => x.id === due[0].id);
-      if (item) item.done = true;
-      saveReminders(r);
-    }
-  }, 30000);
-
-  // Update memory status periodically
-  setInterval(() => {
-    const el = $('#memoryStatus');
-    if (el) el.textContent = loadMemory().length + ' entradas • ' + listReminders().length + ' lembretes';
-  }, 10000);
-
-  // Initial message
-  addMessage('<b>JARVIS:</b> Página pública do JARVIS pronta. Voz local ativa. Configure uma API de IA em Config para respostas completas.', 'assistant');
+  function tick() { const e = $('#clock'); if (e) e.textContent = new Date().toLocaleTimeString('pt-BR'); } setInterval(tick, 1000); tick();
+  // Send
+  $('#sendCommand')?.addEventListener('click', () => { const i = $('#commandInput'); if (i) { runCommand(i.value.trim()); i.value = ''; } });
+  $('#commandInput')?.addEventListener('keydown', e => { if (e.key === 'Enter') { const i = $('#commandInput'); if (i) { runCommand(i.value.trim()); i.value = ''; } } });
+  // Voice
+  $('#testVoice')?.addEventListener('click', () => { addMessage('<b>Você:</b> testar voz', 'user'); const r = 'Voz online.'; addMessage('<b>JARVIS:</b> ' + r, 'assistant'); speak(r); });
+  $('#startVoice')?.addEventListener('click', () => { startListening(); const s = $('#startVoice'); const p = $('#stopVoice'); if (s) s.style.display = 'none'; if (p) p.style.display = ''; });
+  $('#stopVoice')?.addEventListener('click', () => { stopListening(); stopSpeaking(); const s = $('#startVoice'); const p = $('#stopVoice'); if (s) s.style.display = ''; if (p) p.style.display = 'none'; });
+  // Quick
+  $('#openYouTube')?.addEventListener('click', () => { addMessage('<b>Você:</b> Abrir YouTube', 'user'); window.open('https://www.youtube.com', '_blank'); const r = 'Abrindo YouTube.'; addMessage('<b>JARVIS:</b> ' + r, 'assistant'); speak(r); });
+  $('#openBrowser')?.addEventListener('click', () => { const q = prompt('Pesquisar:'); if (q) { addMessage('<b>Você:</b> Pesquisar: ' + q, 'user'); window.open('https://www.google.com/search?q=' + encodeURIComponent(q), '_blank'); const r = 'Pesquisando "' + q + '".'; addMessage('<b>JARVIS:</b> ' + r, 'assistant'); speak(r); } });
+  // Orch
+  updateOrch(); setInterval(updateOrch, 30000);
+  // Reminders
+  setInterval(() => { const d = dueReminders(); if (d.length) { const t = 'Lembrete: ' + d[0].text; addMessage('<b>JARVIS:</b> ⏰ ' + t, 'assistant'); speak(t); const r = loadReminders(); const it = r.find(x => x.id === d[0].id); if (it) it.done = true; saveReminders(r); } }, 30000);
+  // Mem status
+  setInterval(() => { const e = $('#memStatus'); if (e) e.textContent = loadMemory().length + ' entradas • ' + listReminders().length + ' lembretes'; }, 10000);
+  // Init msg
+  addMessage('<b>JARVIS:</b> Página pública pronta. Voz local ativa. Configure API em Config para IA completa.', 'assistant');
 }
 
-// ══════════════════════════════════════════════════════
-// INIT
-// ══════════════════════════════════════════════════════
-
-document.addEventListener('DOMContentLoaded', () => {
-  renderApp();
-});
+// ── INIT ──
+document.addEventListener('DOMContentLoaded', renderApp);
