@@ -41,15 +41,15 @@ app.innerHTML = `
         <button id="testVoice">Testar voz</button>
         <button id="startVoice">Falar</button>
       </div>
-      <p class="muted">Com backend configurado, o Pages envia seus comandos para <code>/api/chat</code>. Sem backend, a página continua com voz local e respostas básicas.</p>
+      <p class="muted">A voz local está ativa. Use os botões abaixo para interagir.</p>
     </section>
   </main>
   <aside class="panel right">
     <h3>▸ OBSERVAÇÕES</h3>
     <div class="orchestrator">
       <p><b>Pages:</b> ativo para acesso público.</p>
-      <p><b>Backend atual:</b> <span id="apiLabel"></span></p>
-      <p><b>Modo:</b> voz local + chat remoto quando houver backend.</p>
+      <p><b>Página pública do JARVIS pronta.</b></p>
+      <p>A voz local já pode ser testada.</p>
     </div>
   </aside>
 </section>
@@ -58,7 +58,7 @@ app.innerHTML = `
 const $ = (s) => document.querySelector(s);
 function tick(){ $('#clock').textContent = new Date().toLocaleTimeString('pt-BR'); }
 setInterval(tick, 1000); tick();
-$('#apiLabel').textContent = apiBase || 'não configurado';
+
 
 function setMode(mode, mood='◎') {
   $('#mode').textContent = mode;
@@ -101,15 +101,9 @@ function localReply(command) {
     return 'Voz online. Estou respondendo diretamente do navegador, Senhor.';
   }
   if (text.includes('status')) {
-    return apiBase
-      ? `A URL configurada para backend é ${apiBase}. Posso testar o status agora.`
-      : 'O backend cloud ainda não foi configurado nesta página. A voz local está ativa.';
+    return 'Sistema operacional. Voz local ativa e pronta.';
   }
-  if (text.includes('testar backend') || text.includes('api status')) {
-    testStatus();
-    return 'Iniciando teste do backend agora.';
-  }
-  return 'Recebi seu comando. Para executar com IA completa, configure uma URL de backend válida.';
+  return 'Recebi seu comando.';
 }
 
 async function fetchWithTimeout(url, options = {}, ms = 12000) {
@@ -243,4 +237,4 @@ $('#commandInput').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') runCommand($('#commandInput').value.trim());
 });
 
-addMessage('Página pública do JARVIS pronta. Configure um backend para usar IA completa.', 'assistant');
+addMessage('Página pública do JARVIS pronta.', 'assistant');
