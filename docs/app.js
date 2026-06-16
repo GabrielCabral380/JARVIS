@@ -1019,9 +1019,44 @@ function renderApp() {
   });
   // Reagenda alarmes ao carregar
   rescheduleAlarms();
+  // Auto-detecta Ollama se estiver rodando localmente
+  (async () => {
+    const cfg = loadConfig();
+    if (cfg.AI_PROVIDER === 'ollama' && cfg.OLLAMA_ENABLED) {
+      try {
+        const r = await fetch(cfg.OLLAMA_URL.replace(/\/$/, '') + '/api/tags', { method: 'GET', signal: AbortSignal.timeout(3000) });
+        if (r.ok) {
+          addMessage('<b>JARVIS:</b> 🦙 Ollama detectado e conectado!', 'assistant');
+        } else {
+          throw new Error('not ok');
+        }
+      } catch {
+        addMessage('<b>JARVIS:</b> ⚠️ Ollama não encontrado em ' + cfg.OLLAMA_URL + '. Diga "remove ollama" para desativar.', 'assistant');
+      }
+    }
+  })();
   // Init msg
   addMessage('<b>JARVIS:</b> ' + greeting + ' Voz contínua, alarmes, lembretes com áudio, ChatGPT. Diga "ajuda" para comandos.', 'assistant');
 }
 
-// -- INIT --
-document.addEventListener('DOMContentLoaded', renderApp);
+// ── INIT ──
+// Auto-detecta Ollama ao carregar (se nenhum outro provedor estiver configurado)
+async function autoDetectOllama() {
+  const cfg = loadConfig();
+  const hasOtherAPI = (cfg.AI_PROVIDER === 'openrouter' && cfg.OPENROUTER_API_KEY) ||
+                      (cfg.AI_PROVIDER === 'openai' && cfg.OPENAI_API_KEY) ||
+                      (cfg.AI_PROVIDER === 'nvidia' && cfg.NVIDIA_API_KEY);
+  if (!hasOtherAPI && cfg.AI_PROVIDER === 'local') {
+    try {
+      const r = await fetch('http://localhost:11434/api/tags', { method: 'GET', signal: AbortSignal.timeout(2000) });
+      if (r.ok) {
+        saveConfig({ AI_PROVIDER: 'ollama', OLLAMA_ENABLED: true });
+        window._ollamaAutoDetected = true;
+      }
+    } catch {}
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  autoDetectOllama().then(() => renderApp());
+});
