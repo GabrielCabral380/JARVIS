@@ -409,8 +409,77 @@ function localReply(cmd) {
     return 'Entendido: "' + cmd + '". Mais alguma coisa?';
   }
 
+  // ══════════════════════════════════════════════════════
+  // CHATGPT — Interação direta via API (antes do nome para evitar conflito)
+  // ══════════════════════════════════════════════════════
+  const chatgptPatterns = [
+    /(?:criar|gerar|crie|gere|desenhar|desenhe|fazer|faça)\s+(?:uma?\s+)?(?:imagem|foto|ilustração|ilustracao|desenho|arte|picture|image)\s+(?:de|do|da|com|sobre)?\s*(.+)/i,
+    /(?:imagem|foto|ilustração|ilustracao|desenho|arte)\s+(?:de|do|da|com|sobre)\s*(.+)/i,
+    /(?:quero|preciso|me\s+(?:dá|da)|mostre)\s+(?:uma?\s+)?(?:imagem|foto|ilustração|ilustracao|desenho|arte)\s+(?:de|do|da|com|sobre)?\s*(.+)/i,
+    /(?:criar|escrever|crie|escreva|fazer|faça|gerar|gere|programar|programe)\s+(?:um|uma)?\s+(?:programa|código|codigo|script|aplicativo|aplicação|app|bot|jogo|site|página|pagina|html|python|javascript|java|c\+\+|php|ruby|rust|go|swift|kotlin)\s*(?:de|do|da|para|que|com|sobre|:)?\s*(.+)?/i,
+    /(?:programa|código|codigo|script|aplicativo|app|bot|jogo|site)\s+(?:de|do|da|para|que|com|sobre)\s*(.+)/i,
+    /(?:perguntar|pergunte|diga|diz|fale|falar|converse|conversar|pedir|peça|peça\s+para)\s+(?:ao\s+)?(?:chatgpt|chat\s*gpt|gpt|ia|ai)\s*(?:sobre|de|do|da|para|que|com|:)?\s*(.+)/i,
+    /(?:chatgpt|chat\s*gpt|gpt)\s*(?:sobre|de|do|da|para|que|com|:)?\s*(.+)/i,
+    /(?:abrir|abre)\s+(?:o\s+)?(?:chatgpt|chat\s*gpt|gpt)/i,
+  ];
+
+  for (const pattern of chatgptPatterns) {
+    const match = cmd.match(pattern);
+    if (match) {
+      const isImageCmd = text.includes('imagem') || text.includes('foto') || text.includes('ilustra') || text.includes('desenho') || text.includes('arte') || text.includes('image') || text.includes('picture');
+      const isCodeCmd = text.includes('programa') || text.includes('código') || text.includes('codigo') || text.includes('script') || text.includes('aplicativo') || text.includes('app') || text.includes('bot') || text.includes('jogo') || text.includes('site') || text.includes('html') || text.includes('python') || text.includes('javascript');
+      const userRequest = match[1] ? match[1].trim() : '';
+
+      let systemPrompt = '';
+      let userPrompt = '';
+
+      if (isImageCmd) {
+        const desc = userRequest || cmd.replace(/criar|gerar|crie|gere|desenhar|desenhe|fazer|faça|uma|imagem|foto|ilustração|de|do|da|com|sobre/gi, '').trim();
+        systemPrompt = 'Você é um especialista em geração de imagens. Descreva a imagem em inglês com máximo detalhe visual para DALL-E. Formato: cena, estilo, iluminação, cores, composição. Máximo 200 palavras.';
+        userPrompt = 'Descreva detalhadamente em inglês uma imagem de: ' + desc;
+      } else if (isCodeCmd) {
+        const lang = text.match(/(python|javascript|java|c\+\+|php|ruby|rust|go|swift|kotlin|html|css|sql|bash|powershell|typescript)/i);
+        const langStr = lang ? lang[1] : 'Python';
+        const task = userRequest || cmd.replace(/criar|escrever|crie|escreva|fazer|faça|gerar|gere|programar|programe|programa|código|codigo|script|aplicativo|app|bot|jogo|site|de|do|da|para|que|com|sobre/gi, '').trim();
+        systemPrompt = 'Você é um programador sênior. Escreva código limpo, comentado e funcional. Inclua exemplo de uso. Linguagem: ' + langStr;
+        userPrompt = 'Escreva um programa em ' + langStr + ' que ' + task + '. Inclua comentários explicativos e exemplo de uso.';
+      } else {
+        const topic = userRequest || cmd.replace(/chatgpt|chat\s*gpt|gpt|perguntar|pergunte|diga|diz|fale|falar|converse|conversar|pedir|peça|ao|sobre|de|do|da|para|que|com/gi, '').trim();
+        systemPrompt = 'Você é JARVIS, assistente inteligente. Responda em português brasileiro de forma clara, direta e útil. Máximo 4 frases.';
+        userPrompt = topic;
+      }
+
+      const cfg = loadConfig();
+      const hasAPI = (cfg.AI_PROVIDER === 'openrouter' && cfg.OPENROUTER_API_KEY) || (cfg.AI_PROVIDER === 'openai' && cfg.OPENAI_API_KEY) || (cfg.AI_PROVIDER === 'nvidia' && cfg.NVIDIA_API_KEY);
+
+      if (hasAPI) {
+        window._chatgptActive = true;
+        window._chatgptSystem = systemPrompt;
+        window._chatgptPrompt = userPrompt;
+        window._chatgptType = isImageCmd ? 'image' : (isCodeCmd ? 'code' : 'chat');
+        runCommand('[CHATGPT]' + userPrompt, false);
+        return '__CHATGPT_API__';
+      }
+
+      window.open('https://chat.openai.com/?model=auto', '_blank');
+      if (isImageCmd) {
+        const desc = userRequest || cmd;
+        return '🎨 ChatGPT aberto. Cole este prompt:\n"Crie uma imagem detalhada de ' + desc + '. Estilo realista, iluminação cinematográfica, alta qualidade."';
+      }
+      if (isCodeCmd) {
+        const lang = text.match(/(python|javascript|java|c\+\+|php|ruby|rust|go|swift|kotlin|html|css|sql|bash|powershell|typescript)/i);
+        const langStr = lang ? lang[1] : '';
+        const task = userRequest || cmd;
+        const codePrompt = langStr ? 'Escreva um programa em ' + langStr + ' que ' + task + '. Código limpo, comentado, com exemplo de uso.' : 'Escreva um programa: ' + task;
+        return '💻 ChatGPT aberto. Cole este prompt:\n"' + codePrompt + '"';
+      }
+      const topic = userRequest || cmd;
+      return '🤖 ChatGPT aberto. Pergunte:\n"' + topic + '"';
+    }
+  }
+
   // ── IDENTIFICAÇÃO DO USUÁRIO ──
-  const nameMatch = text.match(/(?:meu nome é|me chamo|sou o|a|meu nome e)\s+(.+)/i);
+  const nameMatch = text.match(/(?:meu nome é|me chamo|sou o|meu nome e)\s+(.+)/i);
   if (nameMatch) {
     userName = nameMatch[1].trim().split(' ')[0];
     localStorage.setItem('jarvis-username', userName);
@@ -446,85 +515,6 @@ function localReply(cmd) {
   if (text.includes('abrir navegador') || text.includes('abrir browser') || text.includes('abrir google') || text.includes('navegador')) { window.open('https://www.google.com', '_blank'); return 'Abrindo Google.'; }
 
   // ══════════════════════════════════════════════════════
-  // CHATGPT — Interação direta via API (sem abrir abas)
-  // Usa OpenAI API ou OpenRouter para respostas reais
-  // ══════════════════════════════════════════════════════
-  const chatgptPatterns = [
-    /(?:criar|gerar|crie|gere|desenhar|desenhe|fazer|faça)\s+(?:uma?\s+)?(?:imagem|foto|ilustração|ilustracao|desenho|arte|picture|image)\s+(?:de|do|da|com|sobre)?\s*(.+)/i,
-    /(?:imagem|foto|ilustração|ilustracao|desenho|arte)\s+(?:de|do|da|com|sobre)\s+(.+)/i,
-    /(?:quero|preciso|me\s+(?:dá|da)|mostre)\s+(?:uma?\s+)?(?:imagem|foto|ilustração|ilustracao|desenho|arte)\s+(?:de|do|da|com|sobre)?\s*(.+)/i,
-    /(?:criar|escrever|crie|escreva|fazer|faça|gerar|gere|programar|programe)\s+(?:um|uma)?\s+(?:programa|código|codigo|script|aplicativo|aplicação|app|bot|jogo|site|página|pagina|html|python|javascript|java|c\+\+|php|ruby|rust|go|swift|kotlin)\s*(?:de|do|da|para|que|com|sobre|:)?\s*(.+)?/i,
-    /(?:programa|código|codigo|script|aplicativo|app|bot|jogo|site)\s+(?:de|do|da|para|que|com|sobre)\s+(.+)/i,
-    /(?:perguntar|pergunte|diga|diz|fale|falar|converse|conversar|pedir|peça|peça\s+para)\s+(?:ao\s+)?(?:chatgpt|chat\s*gpt|gpt|ia|ai)\s*(?:sobre|de|do|da|para|que|com|:)?\s*(.+)/i,
-    /(?:chatgpt|chat\s*gpt|gpt)\s*(?:sobre|de|do|da|para|que|com|:)?\s*(.+)/i,
-    /(?:abrir|abre)\s+(?:o\s+)?(?:chatgpt|chat\s*gpt|gpt)/i,
-  ];
-
-  for (const pattern of chatgptPatterns) {
-    const match = cmd.match(pattern);
-    if (match) {
-      const isImageCmd = text.includes('imagem') || text.includes('foto') || text.includes('ilustra') || text.includes('desenho') || text.includes('arte') || text.includes('image') || text.includes('picture');
-      const isCodeCmd = text.includes('programa') || text.includes('código') || text.includes('codigo') || text.includes('script') || text.includes('aplicativo') || text.includes('app') || text.includes('bot') || text.includes('jogo') || text.includes('site') || text.includes('html') || text.includes('python') || text.includes('javascript');
-      const userRequest = match[1] ? match[1].trim() : '';
-
-      // Monta prompt otimizado conforme o tipo
-      let systemPrompt = '';
-      let userPrompt = '';
-
-      if (isImageCmd) {
-        const desc = userRequest || cmd.replace(/criar|gerar|crie|gere|desenhar|desenhe|fazer|faça|uma|imagem|foto|ilustração|de|do|da|com|sobre/gi, '').trim();
-        systemPrompt = 'Você é um especialista em geração de imagens. Descreva a imagem em inglês com máximo detalhe visual para DALL-E. Formato: cena, estilo, iluminação, cores, composição. Máximo 200 palavras.';
-        userPrompt = 'Descreva detalhadamente em inglês uma imagem de: ' + desc;
-      } else if (isCodeCmd) {
-        const lang = text.match(/(python|javascript|java|c\+\+|php|ruby|rust|go|swift|kotlin|html|css|sql|bash|powershell|typescript)/i);
-        const langStr = lang ? lang[1] : 'Python';
-        const task = userRequest || cmd.replace(/criar|escrever|crie|escreva|fazer|faça|gerar|gere|programar|programe|programa|código|codigo|script|aplicativo|app|bot|jogo|site|de|do|da|para|que|com|sobre/gi, '').trim();
-        systemPrompt = 'Você é um programador sênior. Escreva código limpo, comentado e funcional. Inclua exemplo de uso. Linguagem: ' + langStr;
-        userPrompt = 'Escreva um programa em ' + langStr + ' que ' + task + '. Inclua comentários explicativos e exemplo de uso.';
-      } else {
-        const topic = userRequest || cmd.replace(/chatgpt|chat\s*gpt|gpt|perguntar|pergunte|diga|diz|fale|falar|converse|conversar|pedir|peça|ao|sobre|de|do|da|para|que|com/gi, '').trim();
-        systemPrompt = 'Você é JARVIS, assistente inteligente. Responda em português brasileiro de forma clara, direta e útil. Máximo 4 frases.';
-        userPrompt = topic;
-      }
-
-      // Tenta usar a API configurada (OpenAI, OpenRouter, NVIDIA)
-      const cfg = loadConfig();
-      const hasAPI = (cfg.AI_PROVIDER === 'openrouter' && cfg.OPENROUTER_API_KEY) ||
-                     (cfg.AI_PROVIDER === 'openai' && cfg.OPENAI_API_KEY) ||
-                     (cfg.AI_PROVIDER === 'nvidia' && cfg.NVIDIA_API_KEY);
-
-      if (hasAPI) {
-        // Retorna null para indicar que vai usar a API — o runCommand vai processar
-        // Seta um flag para o aiChat usar o prompt do ChatGPT
-        window._chatgptActive = true;
-        window._chatgptSystem = systemPrompt;
-        window._chatgptPrompt = userPrompt;
-        window._chatgptType = isImageCmd ? 'image' : (isCodeCmd ? 'code' : 'chat');
-        // Chama o runCommand que vai usar aiChat com o prompt otimizado
-        runCommand('[CHATGPT]' + userPrompt, false);
-        return '__CHATGPT_API__'; // sinal para não processar mais
-      }
-
-      // Sem API: abre ChatGPT web com instruções claras
-      const chatUrl = 'https://chat.openai.com/?model=auto';
-      window.open(chatUrl, '_blank');
-
-      if (isImageCmd) {
-        const desc = userRequest || cmd;
-        return '🎨 ChatGPT aberto. Cole este prompt:\n"Crie uma imagem detalhada de ' + desc + '. Estilo realista, iluminação cinematográfica, alta qualidade."';
-      }
-      if (isCodeCmd) {
-        const lang = text.match(/(python|javascript|java|c\+\+|php|ruby|rust|go|swift|kotlin|html|css|sql|bash|powershell|typescript)/i);
-        const langStr = lang ? lang[1] : '';
-        const task = userRequest || cmd;
-        const codePrompt = langStr ? 'Escreva um programa em ' + langStr + ' que ' + task + '. Código limpo, comentado, com exemplo de uso.' : 'Escreva um programa: ' + task;
-        return '💻 ChatGPT aberto. Cole este prompt:\n"' + codePrompt + '"';
-      }
-      const topic = userRequest || cmd;
-      return '🤖 ChatGPT aberto. Pergunte:\n"' + topic + '"';
-    }
-  }
-
   // ══════════════════════════════════════════════════════
   // INTEGRAÇÕES — Apps Web + Programas do PC
   // ══════════════════════════════════════════════════════
