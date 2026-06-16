@@ -24,6 +24,8 @@ const DEFAULTS = {
   AI_PROVIDER: 'local', OPENAI_API_KEY: '', OPENAI_MODEL: 'gpt-4o-mini', OPENAI_BASE_URL: 'https://api.openai.com/v1',
   OPENROUTER_API_KEY: '', OPENROUTER_MODEL: 'openai/gpt-4o-mini', OPENROUTER_SITE_URL: 'https://gabrielcabral380.github.io/JARVIS/', OPENROUTER_SITE_NAME: 'JARVIS Cloud',
   NVIDIA_API_KEY: '', NVIDIA_MODEL: 'meta/llama-3.1-70b-instruct',
+  // Ollama — IA local, sem API key necessária
+  OLLAMA_ENABLED: true, OLLAMA_URL: 'http://localhost:11434', OLLAMA_MODEL: 'llama3',
   CODEX_ENABLED: false, HERMES_ENABLED: true, HERMES_URL: 'http://localhost:8001',
   OPENCLAW_ENABLED: true, OPENCLAW_URL: 'http://localhost:8675',
   MCP_ENABLED: true, MCP_URL: 'http://localhost:3001/mcp',
@@ -342,12 +344,24 @@ function addTyping() { const w = $('#messages'); if (!w) return null; const d = 
 function removeTyping(el) { if (el && el.parentNode) el.parentNode.removeChild(el); }
 function esc(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
 
-// -- AI CHAT --
+// ── AI CHAT ──
 async function callAI(baseUrl, key, model, msgs) {
   const r = await fetch(baseUrl.replace(/\/$/, '') + '/chat/completions', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + key }, body: JSON.stringify({ model, messages: msgs, max_tokens: 2048, temperature: 0.7 }) });
   if (!r.ok) { const t = await r.text(); throw new Error('HTTP ' + r.status + ': ' + t.slice(0, 200)); }
   const d = await r.json(); return d.choices?.[0]?.message?.content || 'Sem resposta.';
 }
+
+// ── OLLAMA — IA local (sem API key) ──
+async function callOllama(url, model, msgs) {
+  const r = await fetch(url.replace(/\/$/, '') + '/api/chat', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ model, messages: msgs, stream: false })
+  });
+  if (!r.ok) { const t = await r.text(); throw new Error('HTTP ' + r.status + ': ' + t.slice(0, 200)); }
+  const d = await r.json(); return d.message?.content || 'Sem resposta.';
+}
+
 async function aiChat(msg) {
   const c = loadConfig();
 
@@ -358,12 +372,12 @@ async function aiChat(msg) {
     const sys = { role: 'system', content: window._chatgptSystem || 'Você é JARVIS. Responda em pt-BR. Seja direto e útil.' };
     const msgs = [sys, { role: 'user', content: userPrompt }];
     let reply = '';
-    if (c.AI_PROVIDER === 'openrouter' && c.OPENROUTER_API_KEY) reply = await callAI('https://openrouter.ai/api/v1', c.OPENROUTER_API_KEY, c.OPENROUTER_MODEL, msgs);
+    if (c.AI_PROVIDER === 'ollama' && c.OLLAMA_ENABLED) reply = await callOllama(c.OLLAMA_URL, c.OLLAMA_MODEL, msgs);
+    else if (c.AI_PROVIDER === 'openrouter' && c.OPENROUTER_API_KEY) reply = await callAI('https://openrouter.ai/api/v1', c.OPENROUTER_API_KEY, c.OPENROUTER_MODEL, msgs);
     else if (c.AI_PROVIDER === 'openai' && c.OPENAI_API_KEY) reply = await callAI(c.OPENAI_BASE_URL, c.OPENAI_API_KEY, c.OPENAI_MODEL, msgs);
     else if (c.AI_PROVIDER === 'nvidia' && c.NVIDIA_API_KEY) reply = await callAI('https://integrate.api.nvidia.com/v1', c.NVIDIA_API_KEY, c.NVIDIA_MODEL, msgs);
     else reply = localReply(userPrompt);
 
-    // Formata a resposta conforme o tipo
     const type = window._chatgptType || 'chat';
     if (type === 'image') return '🎨 Descrição para imagem gerada:\n\n' + reply + '\n\n✨ Cole esta descrição no ChatGPT ou DALL-E para gerar a imagem.';
     if (type === 'code') return '💻 Código gerado:\n\n' + reply;
@@ -374,6 +388,7 @@ async function aiChat(msg) {
   const mem = loadMemory().slice(-10).map(m => ({ role: m.role === 'preference' ? 'system' : m.role, content: m.text }));
   const sys = { role: 'system', content: 'Você é JARVIS. Responda em pt-BR. Seja direto, claro e curto (máx 3 frases). Nunca seja repetitivo.' };
   const msgs = [sys, ...mem, ...conversationContext.slice(-6), { role: 'user', content: msg }];
+  if (c.AI_PROVIDER === 'ollama' && c.OLLAMA_ENABLED) return callOllama(c.OLLAMA_URL, c.OLLAMA_MODEL, msgs);
   if (c.AI_PROVIDER === 'openrouter' && c.OPENROUTER_API_KEY) return callAI('https://openrouter.ai/api/v1', c.OPENROUTER_API_KEY, c.OPENROUTER_MODEL, msgs);
   if (c.AI_PROVIDER === 'openai' && c.OPENAI_API_KEY) return callAI(c.OPENAI_BASE_URL, c.OPENAI_API_KEY, c.OPENAI_MODEL, msgs);
   if (c.AI_PROVIDER === 'nvidia' && c.NVIDIA_API_KEY) return callAI('https://integrate.api.nvidia.com/v1', c.NVIDIA_API_KEY, c.NVIDIA_MODEL, msgs);
@@ -772,6 +787,12 @@ function localReply(cmd) {
     return 'Claro! Sobre o que quer conversar?';
   }
 
+  // -- REMOVE OLLAMA --
+  if (text.includes('remove ollama') || text.includes('remover ollama') || text.includes('desativar ollama') || text.includes('ollama off')) {
+    saveConfig({ OLLAMA_ENABLED: false, AI_PROVIDER: 'local' });
+    return '🦙 Ollama desativado. Provedor alterado para Local.';
+  }
+
   // -- AJUDA --
   if (text.includes('ajuda') || text.includes('help') || text.includes('o que você faz') || text.includes('o que voce faz') || text.includes('comandos') || text === 'menu' || text === 'opções' || text === 'opcoes')
     return `Posso ajudar com:
@@ -877,8 +898,9 @@ async function runCommand(cmd, fromVoice) {
 function renderConfig() {
   const p = $('#configPanel'); if (!p) return;
   const c = loadConfig();
-  const provs = [{ v: 'local', l: 'Local' }, { v: 'openrouter', l: 'OpenRouter' }, { v: 'openai', l: 'OpenAI' }, { v: 'nvidia', l: 'NVIDIA NIM' }];
+  const provs = [{ v: 'local', l: 'Local' }, { v: 'ollama', l: '🦙 Ollama (Local)' }, { v: 'openrouter', l: 'OpenRouter' }, { v: 'openai', l: 'OpenAI' }, { v: 'nvidia', l: 'NVIDIA NIM' }];
   p.innerHTML = `<div class="config-section"><h4>🤖 Provedor de IA</h4><select id="cfgProvider">${provs.map(x => `<option value="${x.v}" ${c.AI_PROVIDER === x.v ? 'selected' : ''}>${x.l}</option>`).join('')}</select></div>
+  <div class="config-section" id="cfgOL" style="${c.AI_PROVIDER !== 'ollama' ? 'display:none' : ''}"><h4>🦙 Ollama (IA Local)</h4><label>URL: <input id="cfgOLURL" placeholder="http://localhost:11434" value="${c.OLLAMA_URL}" /></label><label>Modelo: <input id="cfgOLM" placeholder="llama3" value="${c.OLLAMA_MODEL}" /></label><p class="muted">Ollama roda localmente. Sem API key necessária.</p></div>
   <div class="config-section" id="cfgOR" style="${c.AI_PROVIDER !== 'openrouter' ? 'display:none' : ''}"><h4>🌐 OpenRouter</h4><input id="cfgORK" type="password" placeholder="sk-or-..." value="${c.OPENROUTER_API_KEY}" /><input id="cfgORM" placeholder="Modelo" value="${c.OPENROUTER_MODEL}" /></div>
   <div class="config-section" id="cfgOA" style="${c.AI_PROVIDER !== 'openai' ? 'display:none' : ''}"><h4>🧠 OpenAI</h4><input id="cfgOAK" type="password" placeholder="sk-..." value="${c.OPENAI_API_KEY}" /><input id="cfgOAM" placeholder="Modelo" value="${c.OPENAI_MODEL}" /><input id="cfgOAB" placeholder="Base URL" value="${c.OPENAI_BASE_URL}" /></div>
   <div class="config-section" id="cfgNV" style="${c.AI_PROVIDER !== 'nvidia' ? 'display:none' : ''}"><h4>⚡ NVIDIA</h4><input id="cfgNVK" type="password" placeholder="nvapi-..." value="${c.NVIDIA_API_KEY}" /><input id="cfgNVM" placeholder="Modelo" value="${c.NVIDIA_MODEL}" /></div>
@@ -888,12 +910,12 @@ function renderConfig() {
   <div class="config-actions"><button id="cfgSave" class="btn primary">Salvar</button><button id="cfgTest" class="btn">Testar API</button><button id="cfgClear" class="btn danger">Limpar Chaves</button></div>
   <div id="cfgResult" class="config-test-result"></div>`;
 
-  const ps = $('#cfgProvider'); if (ps) ps.addEventListener('change', () => { const v = ps.value; document.getElementById('cfgOR').style.display = v === 'openrouter' ? '' : 'none'; document.getElementById('cfgOA').style.display = v === 'openai' ? '' : 'none'; document.getElementById('cfgNV').style.display = v === 'nvidia' ? '' : 'none'; });
+  const ps = $('#cfgProvider'); if (ps) ps.addEventListener('change', () => { const v = ps.value; document.getElementById('cfgOL').style.display = v === 'ollama' ? '' : 'none'; document.getElementById('cfgOR').style.display = v === 'openrouter' ? '' : 'none'; document.getElementById('cfgOA').style.display = v === 'openai' ? '' : 'none'; document.getElementById('cfgNV').style.display = v === 'nvidia' ? '' : 'none'; });
   const rv = $('#cfgVR'); const rvv = $('#cfgVRV'); if (rv && rvv) rv.addEventListener('input', () => rvv.textContent = rv.value);
   const pv = $('#cfgVP'); const pvv = $('#cfgVPV'); if (pv && pvv) pv.addEventListener('input', () => pvv.textContent = pv.value);
 
   $('#cfgSave')?.addEventListener('click', () => {
-    saveConfig({ AI_PROVIDER: $('#cfgProvider')?.value || 'local', OPENROUTER_API_KEY: $('#cfgORK')?.value?.trim() || '', OPENROUTER_MODEL: $('#cfgORM')?.value?.trim() || 'openai/gpt-4o-mini', OPENAI_API_KEY: $('#cfgOAK')?.value?.trim() || '', OPENAI_MODEL: $('#cfgOAM')?.value?.trim() || 'gpt-4o-mini', OPENAI_BASE_URL: $('#cfgOAB')?.value?.trim() || 'https://api.openai.com/v1', NVIDIA_API_KEY: $('#cfgNVK')?.value?.trim() || '', NVIDIA_MODEL: $('#cfgNVM')?.value?.trim() || 'meta/llama-3.1-70b-instruct', VOICE_LANG: $('#cfgVL')?.value?.trim() || 'pt-BR', VOICE_RATE: parseFloat($('#cfgVR')?.value) || 1, VOICE_PITCH: parseFloat($('#cfgVP')?.value) || 0.95, HERMES_URL: $('#cfgHU')?.value?.trim() || 'http://localhost:8001', OPENCLAW_URL: $('#cfgOU')?.value?.trim() || 'http://localhost:8675', MCP_URL: $('#cfgMU')?.value?.trim() || 'http://localhost:3001/mcp', APPROVAL_POLICY: $('#cfgAP')?.value || 'once' });
+    saveConfig({ AI_PROVIDER: $('#cfgProvider')?.value || 'local', OLLAMA_URL: $('#cfgOLURL')?.value?.trim() || 'http://localhost:11434', OLLAMA_MODEL: $('#cfgOLM')?.value?.trim() || 'llama3', OPENROUTER_API_KEY: $('#cfgORK')?.value?.trim() || '', OPENROUTER_MODEL: $('#cfgORM')?.value?.trim() || 'openai/gpt-4o-mini', OPENAI_API_KEY: $('#cfgOAK')?.value?.trim() || '', OPENAI_MODEL: $('#cfgOAM')?.value?.trim() || 'gpt-4o-mini', OPENAI_BASE_URL: $('#cfgOAB')?.value?.trim() || 'https://api.openai.com/v1', NVIDIA_API_KEY: $('#cfgNVK')?.value?.trim() || '', NVIDIA_MODEL: $('#cfgNVM')?.value?.trim() || 'meta/llama-3.1-70b-instruct', VOICE_LANG: $('#cfgVL')?.value?.trim() || 'pt-BR', VOICE_RATE: parseFloat($('#cfgVR')?.value) || 1, VOICE_PITCH: parseFloat($('#cfgVP')?.value) || 0.95, HERMES_URL: $('#cfgHU')?.value?.trim() || 'http://localhost:8001', OPENCLAW_URL: $('#cfgOU')?.value?.trim() || 'http://localhost:8675', MCP_URL: $('#cfgMU')?.value?.trim() || 'http://localhost:3001/mcp', APPROVAL_POLICY: $('#cfgAP')?.value || 'once' });
     addMessage('<b>JARVIS:</b> Configuração salva.', 'assistant'); speak('Configuração salva.');
   });
 
@@ -914,12 +936,13 @@ function renderConfig() {
 // 
 function renderApp() {
   const c = loadConfig();
-  const hasAI = (c.AI_PROVIDER === 'openrouter' && c.OPENROUTER_API_KEY) || (c.AI_PROVIDER === 'openai' && c.OPENAI_API_KEY) || (c.AI_PROVIDER === 'nvidia' && c.NVIDIA_API_KEY);
+  const hasAI = (c.AI_PROVIDER === 'openrouter' && c.OPENROUTER_API_KEY) || (c.AI_PROVIDER === 'openai' && c.OPENAI_API_KEY) || (c.AI_PROVIDER === 'nvidia' && c.NVIDIA_API_KEY) || (c.AI_PROVIDER === 'ollama' && c.OLLAMA_ENABLED);
+  const aiLabel = c.AI_PROVIDER === 'ollama' ? '🦙 Ollama (' + c.OLLAMA_MODEL + ')' : (c.AI_PROVIDER === 'local' ? 'Modo local' : c.AI_PROVIDER);
   const greeting = userName ? 'Olá, ' + userName + '!' : 'Olá! Diga seu nome ou peça ajuda.';
 
   APP.innerHTML = `<header class="topbar"><div class="brand">J·A·R·V·I·S</div><nav><button class="tab active" data-tab="pages">Pages</button><button class="tab" data-tab="config">Config</button></nav><div class="clock" id="clock">--:--:--</div></header>
   <section class="layout">
-    <aside class="panel left"><h3>◉ STATUS</h3><div id="status" class="orchestrator">${hasAI ? 'IA: ' + c.AI_PROVIDER : 'Modo local. Configure API em Config.'}</div><h3>◉ VOZ</h3><div id="voiceStatus" class="orchestrator">Pronta.</div><h3>◉ MEMÓRIA</h3><div id="memStatus" class="orchestrator">${loadMemory().length} entradas • ${listReminders().length} lembretes</div></aside>
+    <aside class="panel left"><h3>◉ STATUS</h3><div id="status" class="orchestrator">${hasAI ? 'IA: ' + aiLabel : 'Modo local. Configure em Config.'}</div><h3>◉ VOZ</h3><div id="voiceStatus" class="orchestrator">Pronta.</div><h3>◉ MEMÓRIA</h3><div id="memStatus" class="orchestrator">${loadMemory().length} entradas • ${listReminders().length} lembretes • ${listAlarms().length} alarmes</div></aside>
     <main class="center">
       <section class="screen tabpage active" id="tab-pages"><div class="orb-wrap"><div class="orb"><div class="face"><h1 id="mood">◎</h1><p id="mode">PAGES</p></div></div></div><div class="chatbox" id="messages"></div><div class="composer"><input id="commandInput" placeholder="Diga ou digite seu comando..." /><button id="sendCommand">Enviar</button></div><div class="quick"><button id="testVoice">🔊 Testar voz</button><button id="startVoice">🎙️ Falar</button><button id="stopVoice" style="display:none">⏹️ Parar</button><button id="openYouTube">📺 YouTube</button><button id="openBrowser">🌐 Pesquisar</button></div><div class="quick" style="margin-top:8px"><button id="openChatGPT">🤖 ChatGPT</button><button id="openChatGPTImage">🎨 Criar Imagem</button><button id="openChatGPTCode">💻 Programar</button></div><p class="muted">Voz contínua. Programas do PC. ChatGPT. Diálogo natural. Diga "ajuda".</p></section>
       <section class="screen tabpage" id="tab-config"><h2>⚙️ Configuração</h2><div id="configPanel"></div></section>
