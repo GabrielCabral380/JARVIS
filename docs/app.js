@@ -178,6 +178,60 @@ function localReply(cmd) {
   if (text.includes('abrir navegador') || text.includes('abrir browser') || text.includes('abrir google') || text.includes('navegador')) { window.open('https://www.google.com', '_blank'); return 'Abrindo Google.'; }
 
   // ══════════════════════════════════════════════════════
+  // CHATGPT — Criar imagens, escrever programas, perguntas
+  // ══════════════════════════════════════════════════════
+  const chatgptPatterns = [
+    // Criar/gerar imagens
+    /(?:criar|gerar|crie|gere|desenhar|desenhe|fazer|faça)\s+(?:uma?\s+)?(?:imagem|foto|ilustração|ilustracao|desenho|arte|picture|image)\s+(?:de|do|da|com|sobre)?\s*(.+)/i,
+    /(?:imagem|foto|ilustração|ilustracao|desenho|arte)\s+(?:de|do|da|com|sobre)\s+(.+)/i,
+    /(?:quero|preciso|me\s+(?:dá|da)|mostre)\s+(?:uma?\s+)?(?:imagem|foto|ilustração|ilustracao|desenho|arte)\s+(?:de|do|da|com|sobre)?\s*(.+)/i,
+    // Escrever/criar programas
+    /(?:criar|escrever|crie|escreva|fazer|faça|gerar|gere|programar|programe)\s+(?:um|uma)?\s+(?:programa|código|codigo|script|aplicativo|aplicação|app|bot|jogo|site|página|pagina|html|python|javascript|java|c\+\+|php|ruby|rust|go|swift|kotlin)\s*(?:de|do|da|para|que|com|sobre|:)?\s*(.+)?/i,
+    /(?:programa|código|codigo|script|aplicativo|app|bot|jogo|site)\s+(?:de|do|da|para|que|com|sobre)\s+(.+)/i,
+    // Perguntas ao ChatGPT
+    /(?:perguntar|pergunte|diga|diz|fale|falar|converse|conversar|pedir|peça|peça\s+para)\s+(?:ao\s+)?(?:chatgpt|chat\s*gpt|gpt|ia|ai)\s*(?:sobre|de|do|da|para|que|com|:)?\s*(.+)/i,
+    /(?:chatgpt|chat\s*gpt|gpt)\s*(?:sobre|de|do|da|para|que|com|:)?\s*(.+)/i,
+    // Abrir ChatGPT direto
+    /(?:abrir|abre)\s+(?:o\s+)?(?:chatgpt|chat\s*gpt|gpt)/i,
+  ];
+
+  for (const pattern of chatgptPatterns) {
+    const match = cmd.match(pattern);
+    if (match) {
+      const isImageCmd = text.includes('imagem') || text.includes('foto') || text.includes('ilustra') || text.includes('desenho') || text.includes('arte') || text.includes('image') || text.includes('picture');
+      const isCodeCmd = text.includes('programa') || text.includes('código') || text.includes('codigo') || text.includes('script') || text.includes('aplicativo') || text.includes('app') || text.includes('bot') || text.includes('jogo') || text.includes('site') || text.includes('html') || text.includes('python') || text.includes('javascript');
+      const userRequest = match[1] ? match[1].trim() : '';
+
+      if (isImageCmd) {
+        const prompt = userRequest || cmd;
+        // Abre ChatGPT com prompt de imagem (GPT-4o com DALL-E)
+        const chatUrl = 'https://chat.openai.com/?model=auto';
+        window.open(chatUrl, '_blank');
+        // Também abre o DALL-E diretamente se possível
+        const dalleUrl = 'https://chat.openai.com/?model=gpt-4o';
+        setTimeout(() => window.open(dalleUrl, '_blank'), 500);
+        return '🎨 Abrindo ChatGPT para criar imagem de: "' + prompt + '". Cole o prompt: "Crie uma imagem de ' + prompt + '"';
+      }
+
+      if (isCodeCmd) {
+        const lang = text.match(/(python|javascript|java|c\+\+|php|ruby|rust|go|swift|kotlin|html|css|sql|bash|powershell|typescript)/i);
+        const langStr = lang ? lang[1] : '';
+        const prompt = userRequest || cmd;
+        const chatUrl = 'https://chat.openai.com/?model=auto';
+        window.open(chatUrl, '_blank');
+        const codePrompt = langStr ? 'Escreva um programa em ' + langStr + ' que ' + prompt : 'Escreva um programa: ' + prompt;
+        return '💻 Abrindo ChatGPT para programar. Cole: "' + codePrompt + '"';
+      }
+
+      // Pergunta geral ao ChatGPT
+      const prompt = userRequest || cmd.replace(/chatgpt|chat\s*gpt|gpt/gi, '').trim();
+      const chatUrl = 'https://chat.openai.com/?model=auto';
+      window.open(chatUrl, '_blank');
+      return '🤖 Abrindo ChatGPT. Pergunte: "' + prompt + '"';
+    }
+  }
+
+  // ══════════════════════════════════════════════════════
   // INTEGRAÇÕES — Apps Web + Programas do PC
   // ══════════════════════════════════════════════════════
 
@@ -515,7 +569,7 @@ function renderApp() {
   <section class="layout">
     <aside class="panel left"><h3>◉ STATUS</h3><div id="status" class="orchestrator">${hasAI ? 'IA: ' + c.AI_PROVIDER : 'Modo local. Configure API em Config.'}</div><h3>◉ VOZ</h3><div id="voiceStatus" class="orchestrator">Pronta.</div><h3>◉ MEMÓRIA</h3><div id="memStatus" class="orchestrator">${loadMemory().length} entradas • ${listReminders().length} lembretes</div></aside>
     <main class="center">
-      <section class="screen tabpage active" id="tab-pages"><div class="orb-wrap"><div class="orb"><div class="face"><h1 id="mood">◎</h1><p id="mode">PAGES</p></div></div></div><div class="chatbox" id="messages"></div><div class="composer"><input id="commandInput" placeholder="Diga ou digite seu comando..." /><button id="sendCommand">Enviar</button></div><div class="quick"><button id="testVoice">🔊 Testar voz</button><button id="startVoice">🎙️ Falar</button><button id="stopVoice" style="display:none">⏹️ Parar</button><button id="openYouTube">📺 YouTube</button><button id="openBrowser">🌐 Pesquisar</button></div><p class="muted">Voz contínua. Programas do PC. Diálogo natural. Diga "ajuda".</p></section>
+      <section class="screen tabpage active" id="tab-pages"><div class="orb-wrap"><div class="orb"><div class="face"><h1 id="mood">◎</h1><p id="mode">PAGES</p></div></div></div><div class="chatbox" id="messages"></div><div class="composer"><input id="commandInput" placeholder="Diga ou digite seu comando..." /><button id="sendCommand">Enviar</button></div><div class="quick"><button id="testVoice">🔊 Testar voz</button><button id="startVoice">🎙️ Falar</button><button id="stopVoice" style="display:none">⏹️ Parar</button><button id="openYouTube">📺 YouTube</button><button id="openBrowser">🌐 Pesquisar</button></div><div class="quick" style="margin-top:8px"><button id="openChatGPT">🤖 ChatGPT</button><button id="openChatGPTImage">🎨 Criar Imagem</button><button id="openChatGPTCode">💻 Programar</button></div><p class="muted">Voz contínua. Programas do PC. ChatGPT. Diálogo natural. Diga "ajuda".</p></section>
       <section class="screen tabpage" id="tab-config"><h2>⚙️ Configuração</h2><div id="configPanel"></div></section>
     </main>
     <aside class="panel right"><h3>▸ OBSERVAÇÕES</h3><div class="orchestrator"><p><b>Pages:</b> ativo.</p><p><b>JARVIS v3.0</b></p><p>Voz contínua.</p><p>Diálogo natural.</p></div><h3>▸ ORQUESTRADOR</h3><div id="orchestratorStatus" class="orchestrator">Verificando...</div></aside>
@@ -535,6 +589,10 @@ function renderApp() {
   // Quick
   $('#openYouTube')?.addEventListener('click', () => { addMessage('<b>Você:</b> Abrir YouTube', 'user'); window.open('https://www.youtube.com', '_blank'); const r = 'Abrindo YouTube.'; addMessage('<b>JARVIS:</b> ' + r, 'assistant'); speak(r); });
   $('#openBrowser')?.addEventListener('click', () => { const q = prompt('Pesquisar:'); if (q) { addMessage('<b>Você:</b> Pesquisar: ' + q, 'user'); window.open('https://www.google.com/search?q=' + encodeURIComponent(q), '_blank'); const r = 'Pesquisando "' + q + '".'; addMessage('<b>JARVIS:</b> ' + r, 'assistant'); speak(r); } });
+  // ChatGPT buttons
+  $('#openChatGPT')?.addEventListener('click', () => { window.open('https://chat.openai.com/?model=auto', '_blank'); addMessage('<b>JARVIS:</b> 🤖 Abrindo ChatGPT.', 'assistant'); speak('Abrindo ChatGPT.'); });
+  $('#openChatGPTImage')?.addEventListener('click', () => { const q = prompt('Descreva a imagem:'); if (q) { window.open('https://chat.openai.com/?model=auto', '_blank'); addMessage('<b>JARVIS:</b> 🎨 ChatGPT aberto. Cole: "Crie uma imagem de ' + q + '"', 'assistant'); speak('ChatGPT aberto. Cole o prompt de imagem.'); } });
+  $('#openChatGPTCode')?.addEventListener('click', () => { const q = prompt('O que o programa deve fazer?'); if (q) { window.open('https://chat.openai.com/?model=auto', '_blank'); addMessage('<b>JARVIS:</b> 💻 ChatGPT aberto. Cole: "Escreva um programa que ' + q + '"', 'assistant'); speak('ChatGPT aberto. Cole o prompt de programação.'); } });
   // Orch
   updateOrch(); setInterval(updateOrch, 30000);
   // Reminders
