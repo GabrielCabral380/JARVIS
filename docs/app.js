@@ -195,12 +195,33 @@ function esc(t) { const d = document.createElement('div'); d.textContent = t; re
 
 // ── AI CHAT ──
 async function callAI(baseUrl, key, model, msgs) {
-  const r = await fetch(baseUrl.replace(/\/$/, '') + '/chat/completions', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + key }, body: JSON.stringify({ model, messages: msgs, max_tokens: 1024, temperature: 0.7 }) });
+  const r = await fetch(baseUrl.replace(/\/$/, '') + '/chat/completions', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + key }, body: JSON.stringify({ model, messages: msgs, max_tokens: 2048, temperature: 0.7 }) });
   if (!r.ok) { const t = await r.text(); throw new Error('HTTP ' + r.status + ': ' + t.slice(0, 200)); }
   const d = await r.json(); return d.choices?.[0]?.message?.content || 'Sem resposta.';
 }
 async function aiChat(msg) {
   const c = loadConfig();
+
+  // Modo ChatGPT ativo — usa prompt otimizado
+  if (window._chatgptActive && msg.startsWith('[CHATGPT]')) {
+    window._chatgptActive = false;
+    const userPrompt = msg.replace('[CHATGPT]', '').trim();
+    const sys = { role: 'system', content: window._chatgptSystem || 'Você é JARVIS. Responda em pt-BR. Seja direto e útil.' };
+    const msgs = [sys, { role: 'user', content: userPrompt }];
+    let reply = '';
+    if (c.AI_PROVIDER === 'openrouter' && c.OPENROUTER_API_KEY) reply = await callAI('https://openrouter.ai/api/v1', c.OPENROUTER_API_KEY, c.OPENROUTER_MODEL, msgs);
+    else if (c.AI_PROVIDER === 'openai' && c.OPENAI_API_KEY) reply = await callAI(c.OPENAI_BASE_URL, c.OPENAI_API_KEY, c.OPENAI_MODEL, msgs);
+    else if (c.AI_PROVIDER === 'nvidia' && c.NVIDIA_API_KEY) reply = await callAI('https://integrate.api.nvidia.com/v1', c.NVIDIA_API_KEY, c.NVIDIA_MODEL, msgs);
+    else reply = localReply(userPrompt);
+
+    // Formata a resposta conforme o tipo
+    const type = window._chatgptType || 'chat';
+    if (type === 'image') return '🎨 Descrição para imagem gerada:\n\n' + reply + '\n\n✨ Cole esta descrição no ChatGPT ou DALL-E para gerar a imagem.';
+    if (type === 'code') return '💻 Código gerado:\n\n' + reply;
+    return reply;
+  }
+
+  // Modo normal
   const mem = loadMemory().slice(-10).map(m => ({ role: m.role === 'preference' ? 'system' : m.role, content: m.text }));
   const sys = { role: 'system', content: 'Você é JARVIS. Responda em pt-BR. Seja direto, claro e curto (máx 3 frases). Nunca seja repetitivo.' };
   const msgs = [sys, ...mem, ...conversationContext.slice(-6), { role: 'user', content: msg }];
@@ -276,20 +297,17 @@ function localReply(cmd) {
   if (text.includes('abrir navegador') || text.includes('abrir browser') || text.includes('abrir google') || text.includes('navegador')) { window.open('https://www.google.com', '_blank'); return 'Abrindo Google.'; }
 
   // ══════════════════════════════════════════════════════
-  // CHATGPT — Criar imagens, escrever programas, perguntas
+  // CHATGPT — Interação direta via API (sem abrir abas)
+  // Usa OpenAI API ou OpenRouter para respostas reais
   // ══════════════════════════════════════════════════════
   const chatgptPatterns = [
-    // Criar/gerar imagens
     /(?:criar|gerar|crie|gere|desenhar|desenhe|fazer|faça)\s+(?:uma?\s+)?(?:imagem|foto|ilustração|ilustracao|desenho|arte|picture|image)\s+(?:de|do|da|com|sobre)?\s*(.+)/i,
     /(?:imagem|foto|ilustração|ilustracao|desenho|arte)\s+(?:de|do|da|com|sobre)\s+(.+)/i,
     /(?:quero|preciso|me\s+(?:dá|da)|mostre)\s+(?:uma?\s+)?(?:imagem|foto|ilustração|ilustracao|desenho|arte)\s+(?:de|do|da|com|sobre)?\s*(.+)/i,
-    // Escrever/criar programas
     /(?:criar|escrever|crie|escreva|fazer|faça|gerar|gere|programar|programe)\s+(?:um|uma)?\s+(?:programa|código|codigo|script|aplicativo|aplicação|app|bot|jogo|site|página|pagina|html|python|javascript|java|c\+\+|php|ruby|rust|go|swift|kotlin)\s*(?:de|do|da|para|que|com|sobre|:)?\s*(.+)?/i,
     /(?:programa|código|codigo|script|aplicativo|app|bot|jogo|site)\s+(?:de|do|da|para|que|com|sobre)\s+(.+)/i,
-    // Perguntas ao ChatGPT
     /(?:perguntar|pergunte|diga|diz|fale|falar|converse|conversar|pedir|peça|peça\s+para)\s+(?:ao\s+)?(?:chatgpt|chat\s*gpt|gpt|ia|ai)\s*(?:sobre|de|do|da|para|que|com|:)?\s*(.+)/i,
     /(?:chatgpt|chat\s*gpt|gpt)\s*(?:sobre|de|do|da|para|que|com|:)?\s*(.+)/i,
-    // Abrir ChatGPT direto
     /(?:abrir|abre)\s+(?:o\s+)?(?:chatgpt|chat\s*gpt|gpt)/i,
   ];
 
@@ -300,32 +318,61 @@ function localReply(cmd) {
       const isCodeCmd = text.includes('programa') || text.includes('código') || text.includes('codigo') || text.includes('script') || text.includes('aplicativo') || text.includes('app') || text.includes('bot') || text.includes('jogo') || text.includes('site') || text.includes('html') || text.includes('python') || text.includes('javascript');
       const userRequest = match[1] ? match[1].trim() : '';
 
+      // Monta prompt otimizado conforme o tipo
+      let systemPrompt = '';
+      let userPrompt = '';
+
       if (isImageCmd) {
-        const prompt = userRequest || cmd;
-        // Abre ChatGPT com prompt de imagem (GPT-4o com DALL-E)
-        const chatUrl = 'https://chat.openai.com/?model=auto';
-        window.open(chatUrl, '_blank');
-        // Também abre o DALL-E diretamente se possível
-        const dalleUrl = 'https://chat.openai.com/?model=gpt-4o';
-        setTimeout(() => window.open(dalleUrl, '_blank'), 500);
-        return '🎨 Abrindo ChatGPT para criar imagem de: "' + prompt + '". Cole o prompt: "Crie uma imagem de ' + prompt + '"';
+        const desc = userRequest || cmd.replace(/criar|gerar|crie|gere|desenhar|desenhe|fazer|faça|uma|imagem|foto|ilustração|de|do|da|com|sobre/gi, '').trim();
+        systemPrompt = 'Você é um especialista em geração de imagens. Descreva a imagem em inglês com máximo detalhe visual para DALL-E. Formato: cena, estilo, iluminação, cores, composição. Máximo 200 palavras.';
+        userPrompt = 'Descreva detalhadamente em inglês uma imagem de: ' + desc;
+      } else if (isCodeCmd) {
+        const lang = text.match(/(python|javascript|java|c\+\+|php|ruby|rust|go|swift|kotlin|html|css|sql|bash|powershell|typescript)/i);
+        const langStr = lang ? lang[1] : 'Python';
+        const task = userRequest || cmd.replace(/criar|escrever|crie|escreva|fazer|faça|gerar|gere|programar|programe|programa|código|codigo|script|aplicativo|app|bot|jogo|site|de|do|da|para|que|com|sobre/gi, '').trim();
+        systemPrompt = 'Você é um programador sênior. Escreva código limpo, comentado e funcional. Inclua exemplo de uso. Linguagem: ' + langStr;
+        userPrompt = 'Escreva um programa em ' + langStr + ' que ' + task + '. Inclua comentários explicativos e exemplo de uso.';
+      } else {
+        const topic = userRequest || cmd.replace(/chatgpt|chat\s*gpt|gpt|perguntar|pergunte|diga|diz|fale|falar|converse|conversar|pedir|peça|ao|sobre|de|do|da|para|que|com/gi, '').trim();
+        systemPrompt = 'Você é JARVIS, assistente inteligente. Responda em português brasileiro de forma clara, direta e útil. Máximo 4 frases.';
+        userPrompt = topic;
       }
 
+      // Tenta usar a API configurada (OpenAI, OpenRouter, NVIDIA)
+      const cfg = loadConfig();
+      const hasAPI = (cfg.AI_PROVIDER === 'openrouter' && cfg.OPENROUTER_API_KEY) ||
+                     (cfg.AI_PROVIDER === 'openai' && cfg.OPENAI_API_KEY) ||
+                     (cfg.AI_PROVIDER === 'nvidia' && cfg.NVIDIA_API_KEY);
+
+      if (hasAPI) {
+        // Retorna null para indicar que vai usar a API — o runCommand vai processar
+        // Seta um flag para o aiChat usar o prompt do ChatGPT
+        window._chatgptActive = true;
+        window._chatgptSystem = systemPrompt;
+        window._chatgptPrompt = userPrompt;
+        window._chatgptType = isImageCmd ? 'image' : (isCodeCmd ? 'code' : 'chat');
+        // Chama o runCommand que vai usar aiChat com o prompt otimizado
+        runCommand('[CHATGPT]' + userPrompt, false);
+        return '__CHATGPT_API__'; // sinal para não processar mais
+      }
+
+      // Sem API: abre ChatGPT web com instruções claras
+      const chatUrl = 'https://chat.openai.com/?model=auto';
+      window.open(chatUrl, '_blank');
+
+      if (isImageCmd) {
+        const desc = userRequest || cmd;
+        return '🎨 ChatGPT aberto. Cole este prompt:\n"Crie uma imagem detalhada de ' + desc + '. Estilo realista, iluminação cinematográfica, alta qualidade."';
+      }
       if (isCodeCmd) {
         const lang = text.match(/(python|javascript|java|c\+\+|php|ruby|rust|go|swift|kotlin|html|css|sql|bash|powershell|typescript)/i);
         const langStr = lang ? lang[1] : '';
-        const prompt = userRequest || cmd;
-        const chatUrl = 'https://chat.openai.com/?model=auto';
-        window.open(chatUrl, '_blank');
-        const codePrompt = langStr ? 'Escreva um programa em ' + langStr + ' que ' + prompt : 'Escreva um programa: ' + prompt;
-        return '💻 Abrindo ChatGPT para programar. Cole: "' + codePrompt + '"';
+        const task = userRequest || cmd;
+        const codePrompt = langStr ? 'Escreva um programa em ' + langStr + ' que ' + task + '. Código limpo, comentado, com exemplo de uso.' : 'Escreva um programa: ' + task;
+        return '💻 ChatGPT aberto. Cole este prompt:\n"' + codePrompt + '"';
       }
-
-      // Pergunta geral ao ChatGPT
-      const prompt = userRequest || cmd.replace(/chatgpt|chat\s*gpt|gpt/gi, '').trim();
-      const chatUrl = 'https://chat.openai.com/?model=auto';
-      window.open(chatUrl, '_blank');
-      return '🤖 Abrindo ChatGPT. Pergunte: "' + prompt + '"';
+      const topic = userRequest || cmd;
+      return '🤖 ChatGPT aberto. Pergunte:\n"' + topic + '"';
     }
   }
 
@@ -593,10 +640,13 @@ async function sendOrch(target, cmd) {
 // ── COMMAND PROCESSOR ──
 async function runCommand(cmd, fromVoice) {
   const prompt = String(cmd || '').trim();
-  addMessage('<b>Você:</b> ' + esc(prompt), 'user');
+  const isChatGPTCmd = prompt.startsWith('[CHATGPT]');
+  const displayPrompt = isChatGPTCmd ? prompt.replace('[CHATGPT]', '').trim() : prompt;
+
+  addMessage('<b>Você:</b> ' + esc(displayPrompt), 'user');
   if (!prompt) { addMessage('<b>JARVIS:</b> Estou ouvindo.', 'assistant'); return; }
-  appendMemory('user', prompt);
-  conversationContext.push({ role: 'user', content: prompt });
+  appendMemory('user', displayPrompt);
+  conversationContext.push({ role: 'user', content: displayPrompt });
   setMode('THINKING', '◌');
   const typing = addTyping();
   try {
@@ -606,6 +656,14 @@ async function runCommand(cmd, fromVoice) {
     else if (lower.startsWith('openclaw:') || lower.startsWith('openclaw ')) reply = await sendOrch('openclaw', prompt.replace(/^openclaw[:\s]*/i, ''));
     else if (lower.startsWith('mcp:') || lower.startsWith('mcp ')) reply = await sendOrch('mcp', prompt.replace(/^mcp[:\s]*/i, ''));
     else reply = await aiChat(prompt);
+
+    // Se o localReply retornou o sinal de ChatGPT API, não mostra (já foi processado)
+    if (reply === '__CHATGPT_API__') {
+      removeTyping(typing);
+      setMode(listening ? 'LISTENING' : 'PAGES', listening ? '◉' : '◎');
+      return;
+    }
+
     removeTyping(typing);
     addMessage('<b>JARVIS:</b> ' + reply, 'assistant');
     appendMemory('assistant', reply);
