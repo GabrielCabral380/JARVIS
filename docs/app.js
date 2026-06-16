@@ -1,8 +1,8 @@
-// ══════════════════════════════════════════════════════
+// 
 // JARVIS — Client-Side Full Implementation v3.0
 // Funciona 100% no GitHub Pages sem backend
 // Diálogo natural, autonomia, interação com PC
-// ══════════════════════════════════════════════════════
+// 
 
 const $ = s => document.querySelector(s);
 const APP = document.getElementById('app');
@@ -12,9 +12,50 @@ let listening = false;
 let safeMode = false;
 let conversationContext = []; // contexto da conversa atual
 let lastQuestion = null; // última pergunta feita pelo JARVIS
-let userName = localStorage.getItem('jarvis-username') || '';
+// ── STORAGE (primeiro para evitar erro de inicialização) ──
+const Store = {
+  get(k, d) { try { return JSON.parse(localStorage.getItem('jarvis-' + k)) ?? d; } catch { return d; } },
+  set(k, v) { localStorage.setItem('jarvis-' + k, JSON.stringify(v)); },
+  del(k) { localStorage.removeItem('jarvis-' + k); }
+};
 
-// ── ALARMS & TIMERS ──
+// ── CONFIG ──
+const DEFAULTS = {
+  AI_PROVIDER: 'local', OPENAI_API_KEY: '', OPENAI_MODEL: 'gpt-4o-mini', OPENAI_BASE_URL: 'https://api.openai.com/v1',
+  OPENROUTER_API_KEY: '', OPENROUTER_MODEL: 'openai/gpt-4o-mini', OPENROUTER_SITE_URL: 'https://gabrielcabral380.github.io/JARVIS/', OPENROUTER_SITE_NAME: 'JARVIS Cloud',
+  NVIDIA_API_KEY: '', NVIDIA_MODEL: 'meta/llama-3.1-70b-instruct',
+  CODEX_ENABLED: false, HERMES_ENABLED: true, HERMES_URL: 'http://localhost:8001',
+  OPENCLAW_ENABLED: true, OPENCLAW_URL: 'http://localhost:8675',
+  MCP_ENABLED: true, MCP_URL: 'http://localhost:3001/mcp',
+  LOCAL_TOOLS_ENABLED: true, APPROVAL_POLICY: 'once',
+  VOICE_LANG: 'pt-BR', VOICE_RATE: 1.0, VOICE_PITCH: 0.95, CONTINUOUS_VOICE: true
+};
+function loadConfig() { return { ...DEFAULTS, ...Store.get('config', {}) }; }
+function saveConfig(p) { const c = loadConfig(); Object.assign(c, p); Store.set('config', c); return c; }
+
+// ── MEMORY ──
+function loadMemory() { return Store.get('memory', []); }
+function saveMemory(m) { Store.set('memory', m.slice(-200)); }
+function appendMemory(role, text) { const m = loadMemory(); m.push({ role, text: String(text).slice(0, 1200), ts: new Date().toISOString() }); saveMemory(m); }
+
+// ── REMINDERS ──
+function loadReminders() { return Store.get('reminders', []); }
+function saveReminders(r) { Store.set('reminders', r); }
+function addReminder(text, when) { const r = loadReminders(); r.push({ id: Date.now().toString(36), text, when: when || null, done: false, created: new Date().toISOString() }); saveReminders(r); return r[r.length - 1]; }
+function listReminders() { return loadReminders().filter(r => !r.done); }
+function dueReminders() { const n = Date.now(); return loadReminders().filter(r => !r.done && r.when && new Date(r.when).getTime() <= n); }
+function parseReminder(text) {
+  const t = text.toLowerCase();
+  const patterns = [/(?:me\s+)?lembre\s+(?:de\s+)?(.+?)(?:\s+em\s+(\d+)\s*(?:min|minutos?|h|horas?))?$/i, /(?:me\s+)?lembrar\s+(?:de\s+)?(.+?)(?:\s+em\s+(\d+)\s*(?:min|minutos?|h|horas?))?$/i, /(?:me\s+)?lembre\s+(?:de\s+)?(.+?)(?:\s+(?:amanh[ãa]|hoje)\s*(?:[àa]s\s+)?([0-9]{1,2}:[0-9]{2}))?$/i];
+  for (const p of patterns) { const m = text.match(p); if (m) { const rt = m[1].trim(); let w = null; if (m[2]) { if (m[2].includes(':')) { const [hh, mm] = m[2].split(':'); const d = new Date(); d.setHours(parseInt(hh), parseInt(mm), 0, 0); if (d < Date.now()) d.setDate(d.getDate() + 1); w = d.toISOString(); } else { const n = parseInt(m[2]); w = new Date(Date.now() + n * (t.includes('hora') ? 3600000 : 60000)).toISOString(); } } else if (t.includes('amanh')) { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); w = d.toISOString(); } return { text: rt, when: w }; } }
+  return null;
+}
+
+// ── APPROVALS ──
+function loadApprovals() { return Store.get('approvals', { trusted: [], pending: [], policy: 'once' }); }
+function saveApprovals(a) { Store.set('approvals', a); }
+
+let userName = localStorage.getItem('jarvis-username') || '';
 let alarms = Store.get('alarms', []);
 let activeAlarmTimeout = null;
 let activeAlarmInterval = null;
@@ -163,50 +204,9 @@ function rescheduleAlarms() {
   alarms.forEach(a => { if (a.active) scheduleAlarm(a); });
 }
 
-// ── STORAGE ──
-const Store = {
-  get(k, d) { try { return JSON.parse(localStorage.getItem('jarvis-' + k)) ?? d; } catch { return d; } },
-  set(k, v) { localStorage.setItem('jarvis-' + k, JSON.stringify(v)); },
-  del(k) { localStorage.removeItem('jarvis-' + k); }
-};
+// -- STORAGE --
 
-// ── CONFIG ──
-const DEFAULTS = {
-  AI_PROVIDER: 'local', OPENAI_API_KEY: '', OPENAI_MODEL: 'gpt-4o-mini', OPENAI_BASE_URL: 'https://api.openai.com/v1',
-  OPENROUTER_API_KEY: '', OPENROUTER_MODEL: 'openai/gpt-4o-mini', OPENROUTER_SITE_URL: 'https://gabrielcabral380.github.io/JARVIS/', OPENROUTER_SITE_NAME: 'JARVIS Cloud',
-  NVIDIA_API_KEY: '', NVIDIA_MODEL: 'meta/llama-3.1-70b-instruct',
-  CODEX_ENABLED: false, HERMES_ENABLED: true, HERMES_URL: 'http://localhost:8001',
-  OPENCLAW_ENABLED: true, OPENCLAW_URL: 'http://localhost:8675',
-  MCP_ENABLED: true, MCP_URL: 'http://localhost:3001/mcp',
-  LOCAL_TOOLS_ENABLED: true, APPROVAL_POLICY: 'once',
-  VOICE_LANG: 'pt-BR', VOICE_RATE: 1.0, VOICE_PITCH: 0.95, CONTINUOUS_VOICE: true
-};
-function loadConfig() { return { ...DEFAULTS, ...Store.get('config', {}) }; }
-function saveConfig(p) { const c = loadConfig(); Object.assign(c, p); Store.set('config', c); return c; }
-
-// ── MEMORY ──
-function loadMemory() { return Store.get('memory', []); }
-function saveMemory(m) { Store.set('memory', m.slice(-200)); }
-function appendMemory(role, text) { const m = loadMemory(); m.push({ role, text: String(text).slice(0, 1200), ts: new Date().toISOString() }); saveMemory(m); }
-
-// ── REMINDERS ──
-function loadReminders() { return Store.get('reminders', []); }
-function saveReminders(r) { Store.set('reminders', r); }
-function addReminder(text, when) { const r = loadReminders(); r.push({ id: Date.now().toString(36), text, when: when || null, done: false, created: new Date().toISOString() }); saveReminders(r); return r[r.length - 1]; }
-function listReminders() { return loadReminders().filter(r => !r.done); }
-function dueReminders() { const n = Date.now(); return loadReminders().filter(r => !r.done && r.when && new Date(r.when).getTime() <= n); }
-function parseReminder(text) {
-  const t = text.toLowerCase();
-  const patterns = [/(?:me\s+)?lembre\s+(?:de\s+)?(.+?)(?:\s+em\s+(\d+)\s*(?:min|minutos?|h|horas?))?$/i, /(?:me\s+)?lembrar\s+(?:de\s+)?(.+?)(?:\s+em\s+(\d+)\s*(?:min|minutos?|h|horas?))?$/i, /(?:me\s+)?lembre\s+(?:de\s+)?(.+?)(?:\s+(?:amanh[ãa]|hoje)\s*(?:[àa]s\s+)?([0-9]{1,2}:[0-9]{2}))?$/i];
-  for (const p of patterns) { const m = text.match(p); if (m) { const rt = m[1].trim(); let w = null; if (m[2]) { if (m[2].includes(':')) { const [hh, mm] = m[2].split(':'); const d = new Date(); d.setHours(parseInt(hh), parseInt(mm), 0, 0); if (d < Date.now()) d.setDate(d.getDate() + 1); w = d.toISOString(); } else { const n = parseInt(m[2]); w = new Date(Date.now() + n * (t.includes('hora') ? 3600000 : 60000)).toISOString(); } } else if (t.includes('amanh')) { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); w = d.toISOString(); } return { text: rt, when: w }; } }
-  return null;
-}
-
-// ── APPROVALS ──
-function loadApprovals() { return Store.get('approvals', { trusted: [], pending: [], policy: 'once' }); }
-function saveApprovals(a) { Store.set('approvals', a); }
-
-// ── VOICE ──
+// -- VOICE --
 let audioCtx = null;
 let keepAliveInterval = null;
 
@@ -335,14 +335,14 @@ function stopListening() {
   stopKeepAlive();
 }
 
-// ── UI ──
+// -- UI --
 function setMode(mode, mood) { const m = $('#mode'); const o = $('#mood'); if (m) m.textContent = mode; if (o) o.textContent = mood || '◎'; }
 function addMessage(html, type) { const w = $('#messages'); if (!w) return; const d = document.createElement('div'); d.className = 'msg ' + (type || 'assistant'); d.innerHTML = html; w.appendChild(d); w.scrollTop = w.scrollHeight; }
 function addTyping() { const w = $('#messages'); if (!w) return null; const d = document.createElement('div'); d.className = 'msg assistant typing'; d.innerHTML = '<span class="dot"></span><span class="dot"></span><span class="dot"></span>'; w.appendChild(d); w.scrollTop = w.scrollHeight; return d; }
 function removeTyping(el) { if (el && el.parentNode) el.parentNode.removeChild(el); }
 function esc(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
 
-// ── AI CHAT ──
+// -- AI CHAT --
 async function callAI(baseUrl, key, model, msgs) {
   const r = await fetch(baseUrl.replace(/\/$/, '') + '/chat/completions', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + key }, body: JSON.stringify({ model, messages: msgs, max_tokens: 2048, temperature: 0.7 }) });
   if (!r.ok) { const t = await r.text(); throw new Error('HTTP ' + r.status + ': ' + t.slice(0, 200)); }
@@ -380,14 +380,14 @@ async function aiChat(msg) {
   return localReply(msg);
 }
 
-// ══════════════════════════════════════════════════════
+// 
 // LOCAL REPLY — Motor inteligente com diálogo natural
-// ══════════════════════════════════════════════════════
+// 
 function localReply(cmd) {
   const text = (cmd || '').toLowerCase().trim();
   if (!text) return 'Estou ouvindo.';
 
-  // ── RESPOSTAS A PERGUNTAS DO JARVIS ──
+  // -- RESPOSTAS A PERGUNTAS DO JARVIS --
   if (lastQuestion) {
     const answer = text;
     lastQuestion = null;
@@ -409,9 +409,9 @@ function localReply(cmd) {
     return 'Entendido: "' + cmd + '". Mais alguma coisa?';
   }
 
-  // ══════════════════════════════════════════════════════
+  // 
   // CHATGPT — Interação direta via API (antes do nome para evitar conflito)
-  // ══════════════════════════════════════════════════════
+  // 
   const chatgptPatterns = [
     /(?:criar|gerar|crie|gere|desenhar|desenhe|fazer|faça)\s+(?:uma?\s+)?(?:imagem|foto|ilustração|ilustracao|desenho|arte|picture|image)\s+(?:de|do|da|com|sobre)?\s*(.+)/i,
     /(?:imagem|foto|ilustração|ilustracao|desenho|arte)\s+(?:de|do|da|com|sobre)\s*(.+)/i,
@@ -478,7 +478,7 @@ function localReply(cmd) {
     }
   }
 
-  // ── IDENTIFICAÇÃO DO USUÁRIO ──
+  // -- IDENTIFICAÇÃO DO USUÁRIO --
   const nameMatch = text.match(/(?:meu nome é|me chamo|sou o|meu nome e)\s+(.+)/i);
   if (nameMatch) {
     userName = nameMatch[1].trim().split(' ')[0];
@@ -489,23 +489,23 @@ function localReply(cmd) {
     return 'Você é ' + userName + ', Senhor.';
   }
 
-  // ── STATUS ──
+  // -- STATUS --
   if (text === 'status' || text.includes('como você está') || text.includes('tudo bem'))
     return 'Sistema OK. Memória: ' + loadMemory().length + ' entradas. Lembretes: ' + listReminders().length + '.';
 
-  // ── VOZ ──
+  // -- VOZ --
   if (text.includes('testar voz') || text.includes('testa voz') || text === 'fala' || text === 'voz')
     return 'Voz online, Senhor.';
   if (text.includes('parar voz') || text.includes('para voz') || text.includes('calar') || text.includes('silêncio') || text === 'stop') {
     stopSpeaking(); stopListening(); return 'Voz pausada.';
   }
 
-  // ── YOUTUBE ──
+  // -- YOUTUBE --
   if (text.includes('youtube') || text.includes('abrir yt') || text === 'yt') { window.open('https://www.youtube.com', '_blank'); return 'Abrindo YouTube.'; }
   const ytM = text.match(/(?:pesquisar|buscar|procurar|tocar|ouvir)\s+(?:no\s+)?youtube\s+(.+)/i) || text.match(/youtube\s+(.+)/i);
   if (ytM) { window.open('https://www.youtube.com/results?search_query=' + encodeURIComponent(ytM[1].trim()), '_blank'); return 'Pesquisando "' + ytM[1].trim() + '" no YouTube.'; }
 
-  // ── PESQUISA ──
+  // -- PESQUISA --
   const sM = text.match(/(?:pesquisar|buscar|procurar)\s+(?:na\s+)?(?:internet|google|web)?\s*(.+)/i);
   if (sM) { const q = sM[1].replace(/^(sobre|por|de|do|da|o|a|os|as|um|uma)\s+/i, '').trim(); if (q) { window.open('https://www.google.com/search?q=' + encodeURIComponent(q), '_blank'); return 'Pesquisando "' + q + '".'; } }
   if (text.includes('pesquis') || text.includes('buscar') || text.includes('procurar')) {
@@ -514,12 +514,12 @@ function localReply(cmd) {
   }
   if (text.includes('abrir navegador') || text.includes('abrir browser') || text.includes('abrir google') || text.includes('navegador')) { window.open('https://www.google.com', '_blank'); return 'Abrindo Google.'; }
 
-  // ══════════════════════════════════════════════════════
-  // ══════════════════════════════════════════════════════
+  // 
+  // 
   // INTEGRAÇÕES — Apps Web + Programas do PC
-  // ══════════════════════════════════════════════════════
+  // 
 
-  // ── E-MAIL ──
+  // -- E-MAIL --
   if (text.includes('email') || text.includes('e-mail') || text.includes('correio')) {
     const emailCmd = text.match(/(?:enviar?|escrever|compor|mandar?)\s+(?:e[-]?email|email|mensagem)\s+(?:para\s+)?(.+)/i);
     if (emailCmd) { const to = emailCmd[1].trim(); window.open('mailto:' + to, '_blank'); return 'Abrindo e-mail para ' + to + '.'; }
@@ -531,7 +531,7 @@ function localReply(cmd) {
   if (text === 'gmail' || text.includes('abrir gmail')) { window.open('https://mail.google.com', '_blank'); return 'Abrindo Gmail.'; }
   if (text === 'outlook' || text.includes('abrir outlook')) { window.open('https://outlook.live.com', '_blank'); return 'Abrindo Outlook.'; }
 
-  // ── WHATSAPP ──
+  // -- WHATSAPP --
   if (text.includes('whatsapp') || text.includes('whats')) {
     if (text.includes('web') || text.includes('computador') || text.includes('pc')) { window.open('https://web.whatsapp.com', '_blank'); return 'Abrindo WhatsApp Web.'; }
     const wMatch = text.match(/(?:whatsapp|whats)\s+(?:para\s+)?(\d[\d\s\-().+]{6,})/i);
@@ -539,7 +539,7 @@ function localReply(cmd) {
     window.open('https://web.whatsapp.com', '_blank'); return 'Abrindo WhatsApp Web.';
   }
 
-  // ── REDES SOCIAIS ──
+  // -- REDES SOCIAIS --
   if (text.includes('instagram') || text === 'insta') { window.open('https://www.instagram.com', '_blank'); return 'Abrindo Instagram.'; }
   if (text.includes('twitter') || text === 'x.com' || text === 'x') { window.open('https://x.com', '_blank'); return 'Abrindo X.'; }
   if (text.includes('facebook') || text === 'face') { window.open('https://www.facebook.com', '_blank'); return 'Abrindo Facebook.'; }
@@ -555,7 +555,7 @@ function localReply(cmd) {
   if (text.includes('pinterest')) { window.open('https://www.pinterest.com', '_blank'); return 'Abrindo Pinterest.'; }
   if (text.includes('reddit')) { window.open('https://www.reddit.com', '_blank'); return 'Abrindo Reddit.'; }
 
-  // ── STREAMING ──
+  // -- STREAMING --
   if (text.includes('netflix')) { window.open('https://www.netflix.com', '_blank'); return 'Abrindo Netflix.'; }
   if (text.includes('spotify')) { window.open('https://open.spotify.com', '_blank'); return 'Abrindo Spotify.'; }
   if (text.includes('disney') || text.includes('disney+')) { window.open('https://www.disneyplus.com', '_blank'); return 'Abrindo Disney+.'; }
@@ -566,7 +566,7 @@ function localReply(cmd) {
   if (text.includes('apple tv') || text.includes('appletv')) { window.open('https://tv.apple.com', '_blank'); return 'Abrindo Apple TV.'; }
   if (text.includes('globoplay') || text.includes('globo play')) { window.open('https://globoplay.globo.com', '_blank'); return 'Abrindo Globoplay.'; }
 
-  // ── TRABALHO / PRODUTIVIDADE ──
+  // -- TRABALHO / PRODUTIVIDADE --
   if (text.includes('google drive') || text === 'drive') { window.open('https://drive.google.com', '_blank'); return 'Abrindo Google Drive.'; }
   if (text.includes('google docs') || text === 'docs') { window.open('https://docs.google.com', '_blank'); return 'Abrindo Google Docs.'; }
   if (text.includes('google sheets') || text.includes('planilha')) { window.open('https://sheets.google.com', '_blank'); return 'Abrindo Google Sheets.'; }
@@ -580,7 +580,7 @@ function localReply(cmd) {
   if (text.includes('dropbox')) { window.open('https://www.dropbox.com', '_blank'); return 'Abrindo Dropbox.'; }
   if (text.includes('onedrive') || text.includes('one drive')) { window.open('https://onedrive.live.com', '_blank'); return 'Abrindo OneDrive.'; }
 
-  // ── COMPRAS / FINANCEIRO ──
+  // -- COMPRAS / FINANCEIRO --
   if (text.includes('amazon')) { window.open('https://www.amazon.com.br', '_blank'); return 'Abrindo Amazon.'; }
   if (text.includes('mercado livre') || text.includes('mercadolibre')) { window.open('https://www.mercadolivre.com.br', '_blank'); return 'Abrindo Mercado Livre.'; }
   if (text.includes('olx')) { window.open('https://www.olx.com.br', '_blank'); return 'Abrindo OLX.'; }
@@ -589,22 +589,22 @@ function localReply(cmd) {
   if (text.includes('ifood')) { window.open('https://www.ifood.com.br', '_blank'); return 'Abrindo iFood.'; }
   if (text.includes('rappi')) { window.open('https://www.rappi.com.br', '_blank'); return 'Abrindo Rappi.'; }
 
-  // ── NOTÍCIAS ──
+  // -- NOTÍCIAS --
   if (text.includes('notícia') || text.includes('noticia') || text.includes('jornal')) { window.open('https://news.google.com', '_blank'); return 'Abrindo notícias.'; }
   if (text.includes('g1') || text.includes('globo')) { window.open('https://g1.globo.com', '_blank'); return 'Abrindo G1.'; }
   if (text.includes('uol')) { window.open('https://www.uol.com.br', '_blank'); return 'Abrindo UOL.'; }
   if (text.includes('cnn')) { window.open('https://www.cnnbrasil.com.br', '_blank'); return 'Abrindo CNN.'; }
   if (text.includes('folha')) { window.open('https://www.folha.uol.com.br', '_blank'); return 'Abrindo Folha.'; }
 
-  // ── MAPAS / TRANSPORTE ──
+  // -- MAPAS / TRANSPORTE --
   if (text.includes('google maps') || text.includes('mapa')) { window.open('https://maps.google.com', '_blank'); return 'Abrindo Google Maps.'; }
   if (text.includes('waze')) { window.open('https://www.waze.com/live-map', '_blank'); return 'Abrindo Waze.'; }
   if (text.includes('uber')) { window.open('https://m.uber.com', '_blank'); return 'Abrindo Uber.'; }
   if (text.includes('99') || text.includes('nove nove')) { window.open('https://99app.com', '_blank'); return 'Abrindo 99.'; }
 
-  // ══════════════════════════════════════════════════════
+  // 
   // PROGRAMAS DO COMPUTADOR (Windows Protocol Handlers)
-  // ══════════════════════════════════════════════════════
+  // 
   function tryOpenApp(appName) {
     const a = appName.toLowerCase().trim();
     const prot = {
@@ -650,7 +650,7 @@ function localReply(cmd) {
     return null;
   }
 
-  // ── ABRIR PROGRAMAS DO PC ──
+  // -- ABRIR PROGRAMAS DO PC --
   const openMatch = text.match(/(?:abrir|abre|abra|executar|execute|inicie|iniciar)\s+(?:o|a|os|as)?\s*(.+)/i);
   if (openMatch) {
     const app = openMatch[1].trim();
@@ -664,19 +664,19 @@ function localReply(cmd) {
     }
   }
 
-  // ── MÚSICA ──
+  // -- MÚSICA --
   if (text.includes('música') || text.includes('musica') || text.includes('tocar') || text.includes('ouvir') || text.includes('quero ouvir')) {
     const am = text.match(/(?:tocar|ouvir|música|musica)\s+(.+)/i);
     if (am) { window.open('https://www.youtube.com/results?search_query=' + encodeURIComponent(am[1].trim()), '_blank'); return 'Buscando: ' + am[1].trim() + '.'; }
     window.open('https://music.youtube.com', '_blank'); return 'Abrindo YouTube Music.';
   }
 
-  // ── CALCULADORA ──
+  // -- CALCULADORA --
   if (text.includes('calculadora') || text.includes('calcul') || text.includes('calcular')) { window.open('ms-calculator:', '_blank'); return 'Abrindo calculadora.'; }
 
-  // ══════════════════════════════════════════════════════
+  // 
   // ALARMES & TIMERS
-  // ══════════════════════════════════════════════════════
+  // 
 
   // Me acorde [hora] da [manhã/tarde/noite]
   const alarmMatch = cmd.match(/(?:me\s+)?acorde\s+(?:às\s+|as\s+)?(\d{1,2})[:\s](\d{2})?\s*(?:da\s+)?(manh[ãa]|tarde|noite|madrugada)?/i) ||
@@ -731,7 +731,7 @@ function localReply(cmd) {
     return 'Alarme parado.';
   }
 
-  // ── LEMBRETES ──
+  // -- LEMBRETES --
   if (text.includes('lembre') || text.includes('lembrar') || text.includes('lembret')) {
     if (text.includes('listar') || text.includes('mostrar') || text.includes('quais') || text.includes('ver')) {
       const r = listReminders(); if (!r.length) return 'Nenhum lembrete ativo.';
@@ -743,7 +743,7 @@ function localReply(cmd) {
     return 'Diga: "Lembre de [algo] em 10 minutos" ou "Lembre de [algo] amanhã às 15:30".';
   }
 
-  // ── MEMÓRIA ──
+  // -- MEMÓRIA --
   if (text.includes('memória') || text.includes('memoria') || text.includes('o que você sabe') || text.includes('suas memórias')) {
     const m = loadMemory(); if (!m.length) return 'Memória vazia.';
     const prefs = m.filter(x => x.role === 'preference');
@@ -756,23 +756,23 @@ function localReply(cmd) {
   const lM = cmd.match(/(?:aprenda que|lembre-se que|guarde que|saiba que|esqueça que)\s+(.+)/i);
   if (lM) { const info = lM[1].trim(); if (text.includes('esque')) { saveMemory(loadMemory().filter(x => x.role !== 'preference' || x.text.toLowerCase() !== info.toLowerCase())); return 'Preferência removida.'; } appendMemory('preference', info); return 'Aprendi: ' + info; }
 
-  // ── HORA / DATA ──
+  // -- HORA / DATA --
   if ((text.includes('hor') && (text.includes('são') || text.includes('sao') || text.includes('é') || text.includes('e'))) || text === 'hora' || text === 'que horas')
     return 'Agora são ' + new Date().toLocaleTimeString('pt-BR') + '.';
   if (text.includes('data') || (text.includes('dia') && (text.includes('hoje') || text.includes('é') || text.includes('e'))))
     return 'Hoje é ' + new Date().toLocaleDateString('pt-BR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) + '.';
 
-  // ── CLIMA ──
+  // -- CLIMA --
   if (text.includes('clima') || text.includes('tempo') || text.includes('temperatura') || text.includes('previsão') || text.includes('previsao'))
     { window.open('https://www.google.com/search?q=previsão+do+tempo', '_blank'); return 'Abrindo previsão do tempo.'; }
 
-  // ── CONVERSA LIVRE ──
+  // -- CONVERSA LIVRE --
   if (text.includes('converse') || text.includes('papo') || text.includes('bater papo') || text.includes('conversar')) {
     lastQuestion = 'chat';
     return 'Claro! Sobre o que quer conversar?';
   }
 
-  // ── AJUDA ──
+  // -- AJUDA --
   if (text.includes('ajuda') || text.includes('help') || text.includes('o que você faz') || text.includes('o que voce faz') || text.includes('comandos') || text === 'menu' || text === 'opções' || text === 'opcoes')
     return `Posso ajudar com:
 • Abrir apps: "Abrir calculadora, bloco de notas, terminal, VS Code, Steam..."
@@ -784,18 +784,18 @@ function localReply(cmd) {
 • Memória: "Aprenda que [info]"
 Diga o que precisa!`;
 
-  // ── MODO SEGURO ──
+  // -- MODO SEGURO --
   if (text.includes('modo seguro') || text.includes('safe mode')) { safeMode = !safeMode; return safeMode ? 'Modo seguro ativado.' : 'Modo seguro desativado.'; }
 
-  // ── LIMPAR CHAT ──
+  // -- LIMPAR CHAT --
   if (text.includes('limpar chat') || text.includes('limpar conversa') || text.includes('limpar mensagens')) { const m = $('#messages'); if (m) m.innerHTML = ''; conversationContext = []; return 'Chat limpo.'; }
 
-  // ── ORQUESTRADORES ──
+  // -- ORQUESTRADORES --
   if (text.includes('hermes') && !text.includes('envie para hermes')) return 'Hermes: orquestrador de agentes. Configure URL em Config.';
   if (text.includes('openclaw') && !text.includes('envie para openclaw')) return 'OpenClaw: executor local. Configure URL em Config.';
   if (text.includes('mcp') && !text.includes('envie para mcp')) return 'MCP: Model Context Protocol. Configure URL em Config.';
 
-  // ── NÃO ENTENDEU — PERGUNTAR ──
+  // -- NÃO ENTENDEU — PERGUNTAR --
   if (text.length > 3) {
     lastQuestion = 'unknown';
     return 'Não entendi "' + cmd + '". Quer que eu pesquise isso ou abre algo relacionado?';
@@ -804,7 +804,7 @@ Diga o que precisa!`;
   return 'Não entendi. Diga "ajuda" para ver os comandos.';
 }
 
-// ── ORCHESTRATOR ──
+// -- ORCHESTRATOR --
 async function checkOrch(url, t = 2000) {
   if (!url) return false;
   try { const c = new AbortController(); setTimeout(() => c.abort(), t); const r = await fetch(url, { signal: c.signal }); return r.ok; } catch { return false; }
@@ -833,7 +833,7 @@ async function sendOrch(target, cmd) {
   } catch { return target + ' indisponível.'; }
 }
 
-// ── COMMAND PROCESSOR ──
+// -- COMMAND PROCESSOR --
 async function runCommand(cmd, fromVoice) {
   const prompt = String(cmd || '').trim();
   const isChatGPTCmd = prompt.startsWith('[CHATGPT]');
@@ -873,7 +873,7 @@ async function runCommand(cmd, fromVoice) {
   } finally { setMode(listening ? 'LISTENING' : 'PAGES', listening ? '◉' : '◎'); }
 }
 
-// ── CONFIG PANEL ──
+// -- CONFIG PANEL --
 function renderConfig() {
   const p = $('#configPanel'); if (!p) return;
   const c = loadConfig();
@@ -909,9 +909,9 @@ function renderConfig() {
   $('#cfgClear')?.addEventListener('click', () => { if (confirm('Remover chaves?')) { saveConfig({ OPENAI_API_KEY: '', OPENROUTER_API_KEY: '', NVIDIA_API_KEY: '' }); addMessage('<b>JARVIS:</b> Chaves removidas.', 'assistant'); renderConfig(); } });
 }
 
-// ══════════════════════════════════════════════════════
+// 
 // MAIN RENDER
-// ══════════════════════════════════════════════════════
+// 
 function renderApp() {
   const c = loadConfig();
   const hasAI = (c.AI_PROVIDER === 'openrouter' && c.OPENROUTER_API_KEY) || (c.AI_PROVIDER === 'openai' && c.OPENAI_API_KEY) || (c.AI_PROVIDER === 'nvidia' && c.NVIDIA_API_KEY);
@@ -1000,5 +1000,5 @@ function renderApp() {
   addMessage('<b>JARVIS:</b> ' + greeting + ' Voz contínua, alarmes, lembretes com áudio, ChatGPT. Diga "ajuda" para comandos.', 'assistant');
 }
 
-// ── INIT ──
+// -- INIT --
 document.addEventListener('DOMContentLoaded', renderApp);
