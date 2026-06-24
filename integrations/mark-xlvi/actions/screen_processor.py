@@ -12,7 +12,12 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
-import sounddevice as sd
+try:
+    import sounddevice as sd
+    _SD_AVAILABLE = True
+except OSError:
+    _SD_AVAILABLE = False
+    sd = None
 
 try:
     import cv2
@@ -349,6 +354,9 @@ class _VisionSession:
             raise  
 
     async def _play_loop(self) -> None:
+        if not _SD_AVAILABLE:
+            print("[Vision] sounddevice unavailable — audio playback skipped")
+            return
         stream = sd.RawOutputStream(
             samplerate=_RECEIVE_SAMPLE_RATE,
             channels=_CHANNELS,

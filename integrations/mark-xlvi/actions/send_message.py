@@ -9,7 +9,7 @@ try:
     pyautogui.FAILSAFE = True
     pyautogui.PAUSE    = 0.06
     _PYAUTOGUI = True
-except ImportError:
+except (ImportError, KeyError, OSError):
     _PYAUTOGUI = False
 
 try:

@@ -6,6 +6,16 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import sys as _sys, os as _os
+_config_dir = str(Path(__file__).resolve().parent / "config")
+_actions_dir = str(Path(__file__).resolve().parent)
+for _d in [_config_dir, _actions_dir]:
+    if _d not in _sys.path:
+        _sys.path.insert(0, _d)
+# Also set parent for 'from config import ...' to work
+_parent = str(Path(__file__).resolve().parent.parent)
+if _parent not in _sys.path:
+    _sys.path.insert(0, _parent)
 from config import is_windows, is_mac, is_linux
 
 def _get_base_dir() -> Path:

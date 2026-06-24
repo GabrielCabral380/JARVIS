@@ -14,7 +14,12 @@ import threading
 from typing import Callable, Optional
 
 import numpy as np
-import sounddevice as sd
+try:
+    import sounddevice as sd
+    _SD_AVAILABLE = True
+except OSError:
+    _SD_AVAILABLE = False
+    sd = None
 
 
 
@@ -81,12 +86,18 @@ def _play_np(samples, sample_rate: int) -> None:
     """Play float32 mono (or stereo) audio via sounddevice.
     Accepts numpy arrays or PyTorch tensors.
     """
+    if not _SD_AVAILABLE:
+        print("[TTS] sounddevice unavailable — audio playback skipped")
+        return
     sd.play(_to_numpy(samples), sample_rate)
     sd.wait()
 
 
 def _play_audio_bytes(audio_bytes: bytes) -> None:
     """Decode MP3/WAV/OGG bytes and play via sounddevice (uses miniaudio)."""
+    if not _SD_AVAILABLE:
+        print("[TTS] sounddevice unavailable — audio playback skipped")
+        return
     import miniaudio
     decoded = miniaudio.decode(
         audio_bytes,
@@ -417,7 +428,8 @@ class TTSPlayer:
                 on_done()
 
     def stop(self) -> None:
-        sd.stop()
+        if _SD_AVAILABLE and sd:
+            sd.stop()
         with self._lock:
             self._playing = False
 

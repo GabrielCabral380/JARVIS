@@ -11,8 +11,10 @@ from datetime import datetime
 
 try:
     import pyautogui
+    pyautogui.FAILSAFE = True
+    pyautogui.PAUSE    = 0.05
     _PYAUTOGUI = True
-except ImportError:
+except (ImportError, KeyError, OSError):
     _PYAUTOGUI = False
 
 _OS = platform.system()  # "Windows" | "Darwin" | "Linux"

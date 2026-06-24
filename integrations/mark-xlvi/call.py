@@ -12,8 +12,16 @@ import json
 import sys
 from pathlib import Path
 
-INTEGRATION_DIR = Path(__file__).resolve().parent.parent
-CONFIG_FILE = INTEGRATION_DIR / "config" / "api_keys.json"
+# Ensure actions/ and config/ are importable regardless of CWD
+_INTEGRATION_DIR = Path(__file__).resolve().parent.parent
+_ACTIONS_DIR = _INTEGRATION_DIR / "actions"
+_CONFIG_DIR = _ACTIONS_DIR / "config"
+for _p in [_ACTIONS_DIR, _CONFIG_DIR, str(_INTEGRATION_DIR)]:
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+
+INTEGRATION_DIR = _INTEGRATION_DIR
+CONFIG_FILE = _INTEGRATION_DIR / "config" / "api_keys.json"
 
 
 def _load_config() -> dict:
@@ -26,7 +34,6 @@ def _load_config() -> dict:
 
 def _get_api_key() -> str:
     """Use unified config from actions/config/__init__.py"""
-    sys.path.insert(0, str(Path(__file__).resolve().parent / "actions"))
     from config import get_api_key
     return get_api_key()
 
@@ -137,6 +144,32 @@ def list_tasks(status: str = None, **kwargs) -> str:
     return json.dumps({"success": True, "tasks": tasks}, ensure_ascii=False)
 
 
+def error_handler(error_message: str = "", **kwargs) -> str:
+    """Analyze an error and suggest action."""
+    from agent.error_handler import analyze_error
+    r = analyze_error(error_message)
+    return json.dumps(r, ensure_ascii=False)
+
+
+def create_plan(goal: str = "", **kwargs) -> str:
+    """Create a multi-step plan for a goal."""
+    from agent.planner import create_plan as _plan
+    r = _plan(goal)
+    return json.dumps(r, ensure_ascii=False)
+
+
+def task_status(**kwargs) -> str:
+    """Get status of the task queue."""
+    from agent.task_queue import get_task_queue
+    q = get_task_queue()
+    return json.dumps({
+        "success": True,
+        "pending": q.pending_count(),
+        "running": q.running_count(),
+        "tasks": q.list_tasks()
+    }, ensure_ascii=False)
+
+
 def cancel_task(task_id: str = "", **kwargs) -> str:
     """Cancel a task by ID."""
     from agent.task_queue import get_task_queue
@@ -148,12 +181,34 @@ def cancel_task(task_id: str = "", **kwargs) -> str:
 # CLI interface
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python call.py <function> '<json_args>'\n")
-        print("Available functions:")
+        print("Usage: python call.py <function> '<json_args>'")
+        print("       python call.py --agent '<json_payload>'")
+        print("\nAvailable functions:")
         funcs = [k for k, v in sorted(globals().items()) if callable(v) and not k.startswith("_")]
         for f in funcs:
             print(f"  {f}")
         sys.exit(1)
+
+    # Direct agent mode: pass full JSON payload
+    if sys.argv[1] == "--agent":
+        try:
+            payload = json.loads(sys.argv[2]) if len(sys.argv) >= 3 else {}
+        except json.JSONDecodeError:
+            print(json.dumps({"success": False, "error": "Invalid JSON payload"}))
+            sys.exit(1)
+        action = payload.get("action", "")
+        parameters = payload.get("parameters", {})
+        func = globals().get(action)
+        if not func:
+            print(json.dumps({"success": False, "error": f"Unknown action: {action}"}))
+            sys.exit(1)
+        try:
+            result = func(**parameters if isinstance(parameters, dict) else {"parameters": parameters})
+            print(json.dumps({"success": True, "output": str(result)}, ensure_ascii=False))
+        except Exception as e:
+            print(json.dumps({"success": False, "error": str(e)}))
+            sys.exit(1)
+        sys.exit(0)
 
     func_name = sys.argv[1]
     args = {}

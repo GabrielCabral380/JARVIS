@@ -1363,7 +1363,7 @@ const server = http.createServer(async (req, res) => {
       for (const key of ['GEMINI_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'AI_PROVIDER']) {
         if (env[key]) env[key] = env[key];
       }
-      const child = spawn(py, [script, payload], {
+      const child = spawn(py, [script, '--agent', payload], {
         cwd: integrationsDir,
         env,
         windowsHide: true,
@@ -1467,6 +1467,18 @@ const server = http.createServer(async (req, res) => {
       fs.appendFileSync(MEMORY_FILE, `\n## Nota ${new Date().toISOString()}\n${note}\n`, 'utf8');
       log('note.saved', { size: note.length });
       return sendJson(res, 200, { ok: true });
+    }
+
+    if (req.method === 'POST' && pathname === '/api/agent') {
+      const body = await readJsonBody(req);
+      const action = String(body.action || '').trim();
+      if (!action) return sendJson(res, 400, { error: 'Ação ausente (action).' });
+      try {
+        const result = await runAgentTool(JSON.stringify(body));
+        return sendJson(res, 200, { ok: true, result: JSON.parse(result || '{}') });
+      } catch (err) {
+        return sendJson(res, 500, { ok: false, error: err.message });
+      }
     }
 
     return serveStatic(req, res, pathname);
