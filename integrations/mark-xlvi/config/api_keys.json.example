@@ -1,0 +1,7 @@
+{
+  "gemini_api_key": "",
+  "os_system": "windows",
+  "stt_engine": "google",
+  "tts_engine": "google",
+  "language": "pt-BR"
+}
