@@ -121,6 +121,30 @@ def web_search(query: str = "", mode: str = "search", **kwargs) -> str:
     return _ws(parameters={"query": query, "mode": mode})
 
 
+def execute_plan(plan: dict = None, **kwargs) -> str:
+    """Execute a plan from the planner. Returns JSON with results."""
+    from agent.executor import AgentExecutor
+    executor = AgentExecutor(max_retries=2)
+    result = executor.execute(plan or kwargs.get("plan", {}))
+    return json.dumps(result, ensure_ascii=False)
+
+
+def list_tasks(status: str = None, **kwargs) -> str:
+    """List tasks from the global task queue."""
+    from agent.task_queue import get_task_queue
+    q = get_task_queue()
+    tasks = q.list_tasks(status_filter=status)
+    return json.dumps({"success": True, "tasks": tasks}, ensure_ascii=False)
+
+
+def cancel_task(task_id: str = "", **kwargs) -> str:
+    """Cancel a task by ID."""
+    from agent.task_queue import get_task_queue
+    q = get_task_queue()
+    cancelled = q.cancel(task_id)
+    return json.dumps({"success": True, "cancelled": cancelled}, ensure_ascii=False)
+
+
 # CLI interface
 if __name__ == "__main__":
     if len(sys.argv) < 2:

@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
-import { spawn, execFile } from 'node:child_process';
+import { spawn, execFile, execSync } from 'node:child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1345,6 +1345,41 @@ function serveStatic(req, res, pathname) {
 }
 
 const server = http.createServer(async (req, res) => {
+  // ============================================================
+  // Agent System helper (defined inside server scope)
+  // ============================================================
+  const integrationsDir = path.join(__dirname, 'integrations', 'mark-xlvi');
+
+  function runAgentTool(payload, timeoutMs) {
+    timeoutMs = timeoutMs || 120000;
+    return new Promise((resolve, reject) => {
+      const script = path.join(integrationsDir, 'call.py');
+      const py = (() => {
+        try { return execSync('python3 --version', { encoding: 'utf8' }).trim() && 'python3'; }
+        catch { try { return execSync('python --version', { encoding: 'utf8' }).trim() && 'python'; }
+        catch { return 'python3'; } }
+      })();
+      const env = { ...process.env };
+      for (const key of ['GEMINI_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'AI_PROVIDER']) {
+        if (env[key]) env[key] = env[key];
+      }
+      const child = spawn(py, [script, payload], {
+        cwd: integrationsDir,
+        env,
+        windowsHide: true,
+      });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (d) => { stdout += d.toString(); });
+      child.stderr.on('data', (d) => { stderr += d.toString(); });
+      child.on('close', (code) => {
+        if (code !== 0) reject(new Error('exited ' + code + ': ' + stderr));
+        else resolve(stdout);
+      });
+      setTimeout(() => { child.kill(); reject(new Error('timeout')); }, timeoutMs);
+    });
+  }
+
   const requestUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   const pathname = requestUrl.pathname || '/';
 
@@ -1478,4 +1513,3 @@ function tryListen(port, attemptsLeft = 10) {
   });
 }
 
-tryListen(PORT);
