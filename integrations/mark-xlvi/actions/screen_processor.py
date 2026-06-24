@@ -63,9 +63,10 @@ def _save_config_key(key: str, value) -> None:
 
 
 def _get_api_key() -> str:
-    key = _load_config().get("gemini_api_key", "")
+    from config import get_api_key
+    key = get_api_key("gemini") or get_api_key()
     if not key:
-        raise RuntimeError("gemini_api_key not found in config.")
+        raise RuntimeError("No API key configured. Set GEMINI_API_KEY, OPENAI_API_KEY or OPENROUTER_API_KEY")
     return key
 
 

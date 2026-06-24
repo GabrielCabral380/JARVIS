@@ -56,6 +56,7 @@ function configuredProvider() {
   const fileEnv = readEnvFile();
   Object.assign(env, process.env, fileEnv);
   const requested = String(env.AI_PROVIDER || '').toLowerCase().trim();
+  if (requested === 'gemini' || env.GEMINI_API_KEY) return 'gemini';
   if (requested === 'openrouter' || env.OPENROUTER_API_KEY) return 'openrouter';
   if (requested === 'openai' || env.OPENAI_API_KEY) return 'openai';
   return 'local';
@@ -69,6 +70,8 @@ function mask(s = '') {
 
 const CONFIG_KEYS = [
   'AI_PROVIDER',
+  'GEMINI_API_KEY',
+  'GEMINI_MODEL',
   'OPENAI_API_KEY',
   'OPENAI_MODEL',
   'OPENAI_BASE_URL',
@@ -98,6 +101,8 @@ function publicConfig() {
   const provider = configuredProvider();
   return {
     AI_PROVIDER: env.AI_PROVIDER || provider,
+    GEMINI_API_KEY_SET: Boolean(env.GEMINI_API_KEY),
+    GEMINI_MODEL: env.GEMINI_MODEL || 'gemini-2.0-flash',
     OPENAI_API_KEY_SET: Boolean(env.OPENAI_API_KEY),
     OPENAI_MODEL: env.OPENAI_MODEL || 'gpt-4o-mini',
     OPENAI_BASE_URL: env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
@@ -141,7 +146,7 @@ function writeEnvConfig(patch = {}) {
     if (typeof value !== 'string' && typeof value !== 'boolean' && typeof value !== 'number') continue;
     const normalized = String(value).trim();
 
-    if ((key === 'OPENAI_API_KEY' || key === 'OPENROUTER_API_KEY') && normalized === '') {
+    if ((key === 'OPENAI_API_KEY' || key === 'OPENROUTER_API_KEY' || key === 'GEMINI_API_KEY') && normalized === '') {
       continue; // campo vazio não apaga chave existente por acidente
     }
 
@@ -1076,6 +1081,7 @@ function localPersonality(message, agent) {
 async function callChatProvider(message, history) {
   const provider = configuredProvider();
   if (provider === 'local') return null;
+  if (provider === 'gemini') return callGeminiProvider(message, history);
   const isOpenRouter = provider === 'openrouter';
   const key = isOpenRouter ? env.OPENROUTER_API_KEY : env.OPENAI_API_KEY;
   if (!key) return null;
@@ -1114,6 +1120,43 @@ async function callChatProvider(message, history) {
   }
   const data = await response.json();
   return data?.choices?.[0]?.message?.content?.trim() || null;
+}
+
+async function callGeminiProvider(message, history) {
+  const key = env.GEMINI_API_KEY;
+  if (!key) return null;
+  const model = env.GEMINI_MODEL || 'gemini-2.0-flash';
+  const system = [
+    'Você é JARVIS, um assistente local elegante, calmo e prático.',
+    'Responda em português quando o usuário falar português.',
+    'Seja direto, útil e seguro. Não invente execução local; descreva limites.',
+    'Nunca peça ou revele chaves de API.'
+  ].join(' ');
+  const contents = [
+    ...history.slice(-8).flatMap(h => [
+      { role: 'user', parts: [{ text: h.user }] },
+      { role: 'model', parts: [{ text: h.assistant }] }
+    ]),
+    { role: 'user', parts: [{ text: message }] }
+  ];
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        contents,
+        system_instruction: { parts: [{ text: system }] },
+        generationConfig: { temperature: 0.7 }
+      })
+    }
+  );
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Gemini HTTP ${response.status}: ${mask(text).slice(0, 500)}`);
+  }
+  const data = await response.json();
+  return data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
 }
 
 async function callCodex(message) {
@@ -1261,6 +1304,7 @@ async function statusPayload() {
     node,
     runtime,
     ai: provider,
+    gemini: Boolean(env.GEMINI_API_KEY),
     openai: Boolean(env.OPENAI_API_KEY),
     openrouter: Boolean(env.OPENROUTER_API_KEY),
     codex,
@@ -1355,6 +1399,7 @@ const server = http.createServer(async (req, res) => {
       const saved = writeEnvConfig(body || {});
       log('config.saved', {
         provider: saved.AI_PROVIDER,
+        gemini: saved.GEMINI_API_KEY_SET,
         openai: saved.OPENAI_API_KEY_SET,
         openrouter: saved.OPENROUTER_API_KEY_SET,
         codex: saved.CODEX_ENABLED

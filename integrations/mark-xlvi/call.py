@@ -3,8 +3,9 @@
 Mark-XLVI Action Entry Points
 ==============================
 Thin wrappers that bridge CLI/Node.js calls to the original Mark-XLVI
-action modules. Each function accepts keyword args and wraps them
-into the {parameters: {...}} dict that the original modules expect.
+action modules. Uses unified API key resolution from JARVIS config.
+
+Priority: JARVIS .env > integrations/mark-xlvi/config/api_keys.json > env vars
 """
 
 import json
@@ -24,7 +25,10 @@ def _load_config() -> dict:
 
 
 def _get_api_key() -> str:
-    return _load_config().get("gemini_api_key", "")
+    """Use unified config from actions/config/__init__.py"""
+    sys.path.insert(0, str(Path(__file__).resolve().parent / "actions"))
+    from config import get_api_key
+    return get_api_key()
 
 
 def flight_finder(origin: str = "", destination: str = "", date: str = "", **kwargs) -> str:
@@ -120,8 +124,7 @@ def web_search(query: str = "", mode: str = "search", **kwargs) -> str:
 # CLI interface
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python call.py <function> '<json_args>'
-")
+        print("Usage: python call.py <function> '<json_args>'\n")
         print("Available functions:")
         funcs = [k for k, v in sorted(globals().items()) if callable(v) and not k.startswith("_")]
         for f in funcs:

@@ -1,12 +1,13 @@
 """
 Mark-XLVI Integration Router for JARVIS Hub
 ============================================
-This module provides a Node.js-compatible interface to invoke
-Mark-XLVI Python action modules via child_process.
+Unified API key resolution:
+- Uses JARVIS .env config (GEMINI_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY)
+- Falls back to integrations/mark-xlvi/config/api_keys.json
+- Auto-detects provider from AI_PROVIDER env var
 
 Usage from server.js:
   import { execMarkXLVI } from './integrations/mark-xlvi/router.js';
-  
   const result = await execMarkXLVI('weather_report', { city: 'São Paulo' });
 """
 
@@ -18,7 +19,7 @@ from pathlib import Path
 
 INTEGRATIONS_DIR = Path(__file__).resolve().parent
 ACTIONS_DIR = INTEGRATIONS_DIR / "actions"
-CONFIG_PATH = INTEGRATIONS_DIR / "config" / "api_keys.json"
+JARVIS_ROOT = INTEGRATIONS_DIR.parent.parent
 
 # Map action name → script entry point
 ACTION_SCRIPTS = {
@@ -41,13 +42,47 @@ ACTION_SCRIPTS = {
 }
 
 
-def get_api_key():
-    """Read Gemini API key from config."""
-    try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            return json.load(f).get("gemini_api_key", "")
-    except Exception:
-        return os.environ.get("GEMINI_API_KEY", "") or os.environ.get("OPENAI_API_KEY", "")
+def _read_jarvis_env() -> dict:
+    """Read JARVIS root .env for API keys."""
+    env_path = JARVIS_ROOT / ".env"
+    out = {}
+    if not env_path.exists():
+        return out
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        out[k.strip()] = v.strip().strip('"').strip("'")
+    return out
+
+
+def get_active_provider() -> str:
+    """Detect active AI provider from environment."""
+    env = _read_jarvis_env()
+    provider = env.get("AI_PROVIDER", "").lower().strip()
+    if provider:
+        return provider
+    # Auto-detect from keys
+    if env.get("GEMINI_API_KEY"):
+        return "gemini"
+    if env.get("OPENROUTER_API_KEY"):
+        return "openrouter"
+    if env.get("OPENAI_API_KEY"):
+        return "openai"
+    return "local"
+
+
+def get_api_key() -> str:
+    """Get API key for the active provider."""
+    env = _read_jarvis_env()
+    provider = get_active_provider()
+    key_map = {
+        "gemini": "GEMINI_API_KEY",
+        "openai": "OPENAI_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
+    }
+    return env.get(key_map.get(provider, ""), "")
 
 
 def run_action(action_name: str, params: dict, timeout: int = 120) -> dict:
@@ -71,7 +106,11 @@ def run_action(action_name: str, params: dict, timeout: int = 120) -> dict:
         return {"success": False, "output": "", "error": f"Script not found: {script_path}"}
 
     env = os.environ.copy()
-    env["GEMINI_API_KEY"] = get_api_key()
+    # Pass JARVIS env vars to Python subprocess
+    jarvis_env = _read_jarvis_env()
+    for key in ["GEMINI_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "AI_PROVIDER"]:
+        if jarvis_env.get(key):
+            env[key] = jarvis_env[key]
     env["PYTHONPATH"] = str(INTEGRATIONS_DIR)
 
     payload = json.dumps({"action": action_name, "parameters": params})
@@ -110,7 +149,6 @@ def list_actions() -> list[dict]:
     for name, script in ACTION_SCRIPTS.items():
         script_path = ACTIONS_DIR / script
         if script_path.exists():
-            # Extract first docstring as description
             desc = ""
             try:
                 content = script_path.read_text(encoding="utf-8", errors="ignore")
@@ -120,7 +158,6 @@ def list_actions() -> list[dict]:
                         if stripped.count('"""') >= 2 or stripped.count("'''") >= 2:
                             desc = stripped.strip('"""').strip("'''").strip()
                             break
-                        # Multi-line docstring
                         continue
                     elif stripped and stripped != "import" and not stripped.startswith("#"):
                         break
@@ -133,6 +170,8 @@ def list_actions() -> list[dict]:
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python router.py <action_name> '<json_params>'")
+        print(f"\nActive provider: {get_active_provider()}")
+        print(f"API key set: {'yes' if get_api_key() else 'no'}")
         print("\nAvailable actions:")
         for a in list_actions():
             print(f"  {a['name']:20s} → {a['script']}")
