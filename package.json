@@ -11,8 +11,6 @@
     "doctor": "node scripts/doctor.mjs",
     "update": "node scripts/update.mjs"
   },
-  "dependencies": {},
-  "devDependencies": {},
   "engines": {
     "node": ">=18"
   }

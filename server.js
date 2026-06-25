@@ -4,6 +4,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { spawn, execFile } from 'node:child_process';
+import { synthesize as ttsSynthesize, listVoices as ttsVoices } from './server/tts.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1387,6 +1388,31 @@ const server = http.createServer(async (req, res) => {
       fs.appendFileSync(MEMORY_FILE, `\n## Nota ${new Date().toISOString()}\n${note}\n`, 'utf8');
       log('note.saved', { size: note.length });
       return sendJson(res, 200, { ok: true });
+    }
+
+    if (req.method === 'GET' && pathname === '/api/tts/voices') {
+      return sendJson(res, 200, { ok: true, voices: ttsVoices() });
+    }
+
+    if (req.method === 'POST' && pathname === '/api/tts/speak') {
+      const body = await readJsonBody(req);
+      const text = String(body.text || '').trim();
+      if (!text) return sendJson(res, 400, { ok: false, error: 'Texto ausente.' });
+      const voice = String(body.voice || '');
+      const rate = String(body.rate || '');
+      try {
+        const audio = await ttsSynthesize(text, { voice, rate });
+        res.writeHead(200, {
+          'content-type': 'audio/mpeg',
+          'cache-control': 'no-cache',
+          'content-length': audio.length,
+        });
+        res.end(audio);
+      } catch (e) {
+        log('tts.error', { error: e.message });
+        return sendJson(res, 500, { ok: false, error: 'Falha na síntese de voz: ' + e.message });
+      }
+      return;
     }
 
     return serveStatic(req, res, pathname);

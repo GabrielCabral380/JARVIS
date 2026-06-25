@@ -118,6 +118,21 @@ app.innerHTML = `
       <button id="saveConfig">Salvar Configuração</button>
       <button id="testApi">Testar API agora</button>
       <div id="configResult" class="muted"></div>
+      <h3>◉ VOZ PT-BR (EdgeTTS)</h3>
+      <p class="muted">Teste a síntese de voz em português. Sem API key necessário.</p>
+      <textarea id="ttsText" rows="2" placeholder="Digite texto para ouvir...">Olá, Gabriel. Sistema de voz JARVIS online. Posso ajudar?</textarea>
+      <label>Voz</label>
+      <select id="ttsVoice">
+        <option value="pt-BR-FranciscaNeural">Francisca (PT-BR feminina)</option>
+        <option value="pt-BR-AntonioNeural">Antonio (PT-BR masculino)</option>
+        <option value="pt-PT-RaquelNeural">Raquel (PT-PT)</option>
+        <option value="en-US-GuyNeural">Guy (EN-US)</option>
+      </select>
+      <div class="quick">
+        <button id="ttsSpeak">🔊 Falar</button>
+        <button id="ttsStop">⏹ Parar</button>
+      </div>
+      <audio id="ttsAudio" style="display:none"></audio>
     </section>
   </main>
 
@@ -175,7 +190,35 @@ function setMode(mode, mood = '◉') {
   $('#mood').textContent = mood;
 }
 
-function speak(text) {
+async function speak(text, opts = {}) {
+  if (!text) return;
+
+  // Try server-side EdgeTTS first (higher quality, PT-BR)
+  try {
+    const res = await fetch('/api/tts/speak', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text, voice: opts.voice || '', rate: opts.rate || '' }),
+    });
+    if (res.ok) {
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.onplay = () => setMode('SPEAKING', '◉');
+      audio.onended = () => { setMode('IDLE', '◎'); URL.revokeObjectURL(url); };
+      audio.onerror = () => { URL.revokeObjectURL(url); fallbackSpeak(text); };
+      await audio.play();
+      return;
+    }
+  } catch (e) {
+    // fallback to browser TTS
+  }
+
+  // Fallback: Web Speech API
+  fallbackSpeak(text);
+}
+
+function fallbackSpeak(text) {
   if (!('speechSynthesis' in window)) return;
   window.speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
@@ -529,6 +572,37 @@ events.onmessage = ev => {
 };
 events.onerror = () => {
   $('#logs').textContent = `[local] aguardando eventos...\n` + $('#logs').textContent.slice(0, 3000);
+};
+
+// --- TTS Controls ---
+$('#ttsSpeak').onclick = async () => {
+  const text = $('#ttsText').value.trim();
+  if (!text) return;
+  const voice = $('#ttsVoice').value;
+  const audio = $('#ttsAudio');
+  try {
+    const res = await fetch('/api/tts/speak', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text, voice }),
+    });
+    if (res.ok) {
+      const blob = await res.blob();
+      audio.src = URL.createObjectURL(blob);
+      audio.onended = () => URL.revokeObjectURL(audio.src);
+      await audio.play();
+    } else {
+      add('assistant', 'Erro no TTS: ' + res.status);
+    }
+  } catch (e) {
+    add('assistant', 'Falha ao conectar TTS. Usando navegador.');
+    fallbackSpeak(text);
+  }
+};
+$('#ttsStop').onclick = () => {
+  const audio = $('#ttsAudio');
+  if (audio) { audio.pause(); audio.currentTime = 0; }
+  window.speechSynthesis?.cancel();
 };
 
 setInterval(() => $('#clock').textContent = new Date().toLocaleTimeString('pt-BR'), 1000);
