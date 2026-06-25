@@ -585,31 +585,29 @@ $('#mic').onclick = () => {
 };
 if (recognition) {
   recognition.onresult = e => {
-    let interim = '';
-    let final = '';
-    for (let i = 0; i < e.results.length; i++) {
-      const t = e.results[i][0].transcript;
-      if (e.results[i].isFinal) final += t;
-      else interim += t;
-    }
-    if (interim) {
-      add('user', interim.trim());
-      $('#input').value = interim.trim();
-    }
-    if (final) {
-      window._voiceBuffer = (window._voiceBuffer + ' ' + final.trim()).trim();
+    const last = e.results[e.results.length - 1];
+    if (last?.isFinal) {
+      const transcript = last[0].transcript.trim();
+      window._voiceBuffer = (window._voiceBuffer + ' ' + transcript).trim();
+      add('user', transcript);
+      $('#input').value = window._voiceBuffer;
       clearTimeout(window._voiceFinalTimer);
       window._voiceFinalTimer = setTimeout(() => {
-        if (window._voiceBuffer) {
-          handleVoiceTranscript(window._voiceBuffer);
+        if (window._voiceBuffer && voiceActive) {
+          const cmd = window._voiceBuffer;
           window._voiceBuffer = '';
+          $('#input').value = '';
+          handleVoiceTranscript(cmd);
         }
-      }, 1200);
-    }
-    const last = e.results[e.results.length - 1];
-    if (last?.isFinal && !final) {
-      clearTimeout(window._voiceFinalTimer);
-      handleVoiceTranscript(last[0].transcript);
+      }, 1500);
+    } else {
+      let interim = '';
+      for (let i = 0; i < e.results.length; i++) {
+        if (!e.results[i].isFinal) interim += e.results[i][0].transcript;
+      }
+      if (interim.trim()) {
+        $('#input').value = (window._voiceBuffer + ' ' + interim).trim();
+      }
     }
   };
   recognition.onerror = e => {
@@ -617,7 +615,14 @@ if (recognition) {
   };
   recognition.onend = () => {
     recognitionStarting = false;
-    if (voiceActive) setTimeout(startContinuousVoice, 450);
+    if (window._voiceBuffer && voiceActive) {
+      clearTimeout(window._voiceFinalTimer);
+      const cmd = window._voiceBuffer;
+      window._voiceBuffer = '';
+      $('#input').value = '';
+      handleVoiceTranscript(cmd);
+    }
+    if (voiceActive) setTimeout(startContinuousVoice, 300);
     else setMode('IDLE', '◎');
   };
 }
