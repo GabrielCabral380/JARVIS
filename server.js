@@ -5,6 +5,8 @@ import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { spawn, execFile } from 'node:child_process';
 import { synthesize as ttsSynthesize, listVoices as ttsVoices } from './server/tts.js';
+import { runFileOp, runMediaOp, runSystemOp, runSmartHomeOp, runTranslateOp, runCalcOp, executeCommand } from './server/executor.js';
+import { findActions, getCapabilitiesList, getAllActions } from './server/capabilities.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -613,7 +615,7 @@ function inferLocalSkill(message = '') {
   }
 
   if (/(abrir|abra|abre|iniciar|inicie).*(navegador|browser|chrome|edge|firefox)/i.test(lower)) {
-    let browser = /firefox/i.test(lower) ? 'firefox' : /edge/i.test(lower) ? 'edge' : /chrome/i.test(lower) ? 'chrome' : 'default';
+    const browser = /firefox/i.test(lower) ? 'firefox' : /edge/i.test(lower) ? 'edge' : /chrome/i.test(lower) ? 'chrome' : 'default';
     return { action: 'open_browser', browser };
   }
 
@@ -622,10 +624,84 @@ function inferLocalSkill(message = '') {
   const app = lower.match(/(?:abrir|abra|abre|iniciar|inicie)\s+(?:o\s+|a\s+)?(bloco de notas|notepad|explorer|explorador|paint|terminal|powershell|cmd|vscode|visual studio code|chrome|edge|firefox)/i);
   if (app) return { action: 'open_app', app: app[1] };
 
+  // ─── FILE OPERATIONS ───
+  let m;
+  m = lower.match(/^(?:criar|crie|nova?)\s+(?:pasta|diret[oó]rio|folder)\s+(?:em\s+)?(.+)/i);
+  if (m) return { action: 'file', command: 'mkdir', args: [m[1].trim()] };
+
+  m = lower.match(/^(?:renomear|rename)\s+(?:o\s+|a\s+)?(?:arquivo\s+)?(.+?)\s+(?:para|como)\s+(.+)/i);
+  if (m) return { action: 'file', command: 'rename', args: [m[1].trim(), m[2].trim()] };
+
+  m = lower.match(/^(?:copiar|copy)\s+(?:o\s+|a\s+)?(?:arquivo\s+)?(.+?)\s+(?:para|to)\s+(.+)/i);
+  if (m) return { action: 'file', command: 'copy', args: [m[1].trim(), m[2].trim()] };
+
+  m = lower.match(/^(?:mover|move)\s+(?:o\s+|a\s+)?(?:arquivo\s+)?(.+?)\s+(?:para|to)\s+(.+)/i);
+  if (m) return { action: 'file', command: 'move', args: [m[1].trim(), m[2].trim()] };
+
+  m = lower.match(/^(?:listar|list|mostrar)\s+(?:arquivos?|ficheiros?)\s+(?:de|da|em)\s+(.+)/i);
+  if (m) return { action: 'file', command: 'list', args: [m[1].trim()] };
+
+  // ─── MEDIA ───
+  m = lower.match(/^volume\s+(?:para\s+)?(\d{1,3})\s*%/i);
+  if (m) return { action: 'media', command: 'volume', args: [Math.min(100, parseInt(m[1]))] };
+  if (/(?:mudo|mutar|silenciar)/i.test(lower)) return { action: 'media', command: 'volume', args: [0] };
+  if (/(?:aumentar|subir)\s+volume/i.test(lower)) return { action: 'media', command: 'volume_up', args: [] };
+  if (/(?:diminuir|baixar)\s+volume/i.test(lower)) return { action: 'media', command: 'volume_down', args: [] };
+  if (/^(?:tocar|play|reproduzir)\s+(?:m[uú]sica|faixa|v[ií]deo)?/i.test(lower)) return { action: 'media', command: 'play', args: [] };
+  if (/^(?:pausar|pause)\s+(?:m[uú]sica|faixa)?/i.test(lower)) return { action: 'media', command: 'pause', args: [] };
+  if (/(?:pr[oó]xim[ao]|next|avan[cc]ar|seguinte)/i.test(lower)) return { action: 'media', command: 'next', args: [] };
+  if (/(?:anterior|previous|voltar)/i.test(lower)) return { action: 'media', command: 'previous', args: [] };
+  if (/^(?:parar|stop)\s+(?:m[uú]sica|reprodu[cc][cç][aã]o)?/i.test(lower)) return { action: 'media', command: 'stop', args: [] };
+
+  // ─── SMART HOME ───
+  m = lower.match(/^(?:ligar|acender)\s+(?:a\s+)?luz(?:es)?\s+(?:do|da|de|no|na)?\s*([\w\s]+)?/i);
+  if (m) return { action: 'smart_home', command: 'light_on', args: [m[1] || 'geral'] };
+  m = lower.match(/^(?:desligar|apagar)\s+(?:a\s+)?luz(?:es)?\s+(?:do|da|de|no|na)?\s*([\w\s]+)?/i);
+  if (m) return { action: 'smart_home', command: 'light_off', args: [m[1] || 'geral'] };
+  m = lower.match(/^(?:temperatura|ar\s+condicionado|ac)\s+(?:para\s+|em\s+)?(\d{1,2})\s*[°º]?c?/i);
+  if (m) return { action: 'smart_home', command: 'temperature', args: [Math.min(30, Math.max(16, parseInt(m[1])))] };
+  if (/^(?:ligar|ativar)\s+(?:ar\s+condicionado|ac|ar)/i.test(lower)) return { action: 'smart_home', command: 'ac_on', args: [] };
+  if (/^(?:desligar|desativar)\s+(?:ar\s+condicionado|ac|ar)/i.test(lower)) return { action: 'smart_home', command: 'ac_off', args: [] };
+
+  // ─── SYSTEM ───
+  if (/^(?:capturar|tirar|fazer|capture)\s+(?:screenshot|captura\s+de\s+tela|foto\s+da\s+tela|tela|screenshot)/i.test(lower) || /^screenshot$/i.test(lower)) return { action: 'system', command: 'screenshot', args: [] };
+  if (/(?:status|info)\s+(?:do\s+)?sistema/i.test(lower)) return { action: 'system', command: 'system_status', args: [] };
+  if (/(?:disco|espa[cc]o)\s+(?:livre|dispon[ií]vel)/i.test(lower)) return { action: 'system', command: 'disk_space', args: [] };
+  if (/(?:mem[oó]ria|ram)\s+(?:livre|uso)/i.test(lower)) return { action: 'system', command: 'memory', args: [] };
+  if (/(?:processos|process)\s+(?:rodando|ativos)/i.test(lower)) return { action: 'system', command: 'process_list', args: [] };
+  if (/(?:bateria|battery)/i.test(lower)) return { action: 'system', command: 'battery', args: [] };
+  if (/(?:rede|network|wi-?fi|internet)/i.test(lower)) return { action: 'system', command: 'network', args: [] };
+  if (/(?:uptime|tempo\s+de\s+execu[cc][cç][aã]o|h[aá]\s+quanto)/i.test(lower)) return { action: 'system', command: 'uptime', args: [] };
+
+  // ─── CALCULATOR ───
+  m = lower.match(/(?:quanto [eé]\s+)?(\d{1,4})\s*%\s+(?:de|do|da)\s+(\d{1,6})/i);
+  if (m) {
+    const pct = parseInt(m[1]);
+    const val = parseInt(m[2]);
+    return { action: 'calc', command: 'calc', args: [(pct / 100) * val] };
+  }
+  m = lower.match(/(?:quanto\s+[eé]\s+|calcule\s+|calcula\s+)?(\d{1,10})\s*(?:mais|\+|menos\s*|subtrai|vezes|x|\*|\/|\u00f7|dividido\s+por)\s*(\d{1,10})/i);
+  if (m) {
+    const a = parseFloat(m[1]);
+    const b = parseFloat(m[2]);
+    let res = 0;
+    if (lower.includes('mais') || lower.includes('+')) res = a + b;
+    else if (lower.includes('menos') || lower.includes('subtrai') || lower.includes('-')) res = a - b;
+    else if (lower.includes('vezes') || lower.includes('x ') || lower.includes('*')) res = a * b;
+    else if (lower.includes('/') || lower.includes('\u00f7') || lower.includes('dividido')) res = b !== 0 ? a / b : 0;
+    return { action: 'calc', command: 'calc', args: [res] };
+  }
+
+  // ─── TRANSLATE ───
+  m = lower.match(/^(?:traduzir|traduz|translate)\s+(?:o\s+|a\s+)?["""]?(.+?)["""]?\s+(?:para|em|in)\s+(.+)/i);
+  if (m) return { action: 'translate', command: 'translate', args: [m[1].trim(), m[2].trim()] };
+  m = lower.match(/como\s+(?:se\s+)?(?:diz|fala)\s+(.+?)\s+(?:em|in|no)\s+(.+)/i);
+  if (m) return { action: 'translate', command: 'translate', args: [m[1].trim(), m[2].trim()] };
+
   return null;
 }
 
-function runNativeLocalSkill(skill) {
+async function runNativeLocalSkill(skill) {
   if (skill.action === 'open_url') {
     openUrlWithSystem(skill.url || 'https://www.google.com');
     return { ok: true, text: `${skill.label || 'Página'} aberta no navegador.`, action: skill.action };
@@ -669,6 +745,33 @@ function runNativeLocalSkill(skill) {
       return { ok: false, text: `Não consegui abrir ${app}: ${mask(e.message)}`, action: skill.action };
     }
   }
+
+  // ─── NEW ACTIONS ───
+  if (skill.action === 'file') {
+    const r = runFileOp(skill);
+    return { ...r, action: skill.action };
+  }
+  if (skill.action === 'media') {
+    const r = await runMediaOp(skill);
+    return { ...r, action: skill.action };
+  }
+  if (skill.action === 'system') {
+    const r = await runSystemOp(skill);
+    return { ...r, action: skill.action };
+  }
+  if (skill.action === 'smart_home') {
+    const r = runSmartHomeOp(skill);
+    return { ...r, action: skill.action };
+  }
+  if (skill.action === 'calc') {
+    const val = skill.args ? skill.args[0] : null;
+    return { ok: true, text: `Resultado: ${val}`, action: skill.action };
+  }
+  if (skill.action === 'translate') {
+    const r = await runTranslateOp(skill);
+    return { ...r, action: skill.action };
+  }
+
   return { ok: false, text: 'Skill local não suportada.', action: skill.action };
 }
 
@@ -704,10 +807,21 @@ async function runLocalSkill(skill = {}, options = {}) {
     return { ok: false, text: 'Ferramentas locais estão desabilitadas em Config.', action: skill.action };
   }
   const bypassApproval = options && options.skipApproval === true;
-  const sensitiveLocalActions = ['open_url', 'youtube_search', 'search_web', 'open_browser', 'open_app'];
+  const sensitiveLocalActions = ['open_url', 'youtube_search', 'search_web', 'open_browser', 'open_app', 'file'];
   if (!bypassApproval && sensitiveLocalActions.includes(String(skill.action || '').toLowerCase())) {
     const gated = ensureApproved('local-tool', skill);
     if (gated) return gated;
+  }
+  const nativeActions = ['file', 'system', 'media', 'smart_home', 'calc', 'translate'];
+  if (nativeActions.includes(skill.action)) {
+    // Normalize: ensure skill has cmd and args for the executor
+    const execSkill = {
+      ...skill,
+      cmd: skill.cmd || skill.command,
+      args: skill.args || skill.command?.args || [],
+    };
+    const native = await runNativeLocalSkill(execSkill);
+    if (native.ok || !native.requiresApproval) return native;
   }
   if (skill.action === 'learn') {
     const value = String(skill.text || '').trim();
@@ -1388,6 +1502,23 @@ const server = http.createServer(async (req, res) => {
       fs.appendFileSync(MEMORY_FILE, `\n## Nota ${new Date().toISOString()}\n${note}\n`, 'utf8');
       log('note.saved', { size: note.length });
       return sendJson(res, 200, { ok: true });
+    }
+
+    if (req.method === 'GET' && pathname === '/api/capabilities') {
+      const list = getCapabilitiesList();
+      return sendJson(res, 200, { ok: true, ...list });
+    }
+
+    if (req.method === 'POST' && pathname === '/api/capabilities/query') {
+      const body = await readJsonBody(req);
+      const results = findActions(body.query || '');
+      return sendJson(res, 200, { ok: true, query: body.query, results });
+    }
+
+    if (req.method === 'POST' && pathname === '/api/execute') {
+      const body = await readJsonBody(req);
+      const result = await executeCommand(body);
+      return sendJson(res, result.ok ? 200 : 400, result);
     }
 
     if (req.method === 'GET' && pathname === '/api/tts/voices') {

@@ -64,14 +64,29 @@ asyncio.run(main())
  * @param {object} [opts] - { rate, pitch, volume }
  * @returns {Promise<Buffer>} MP3 audio buffer
  */
-export async function synthesize(text, voice = DEFAULT_VOICE, opts = {}) {
+export async function synthesize(text, voiceOrOpts = DEFAULT_VOICE, opts = {}) {
   if (!text || !text.trim()) {
     throw new Error('Texto vazio para síntese de voz');
   }
 
-  const rate = opts.rate || '+0%';
-  const volume = opts.volume || '+0%';
-  const pitch = opts.pitch || '+0Hz';
+  let voice = DEFAULT_VOICE;
+  let rate = '+0%';
+  let volume = '+0%';
+  let pitch = '+0Hz';
+
+  if (typeof voiceOrOpts === 'string') {
+    voice = voiceOrOpts;
+    if (opts) {
+      rate = opts.rate || '+0%';
+      volume = opts.volume || '+0%';
+      pitch = opts.pitch || '+0Hz';
+    }
+  } else if (voiceOrOpts && typeof voiceOrOpts === 'object') {
+    voice = voiceOrOpts.voice || DEFAULT_VOICE;
+    rate = voiceOrOpts.rate || '+0%';
+    volume = voiceOrOpts.volume || '+0%';
+    pitch = voiceOrOpts.pitch || '+0Hz';
+  }
 
   return new Promise((resolve, reject) => {
     const args = ['-c', TTS_SCRIPT, text, voice, rate, volume, pitch];
@@ -107,3 +122,4 @@ export async function listAllVoices() {
 }
 
 export { DEFAULT_VOICE, PREFERRED_VOICES };
+export const listVoices = listPreferredVoices;
