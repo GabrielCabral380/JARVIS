@@ -5,7 +5,7 @@ services:
     plan: free
     autoDeploy: true
     rootDir: .
-    buildCommand: npm install
+    buildCommand: pip install -r requirements.txt && npm install
     startCommand: npm start
     healthCheckPath: /api/status
     envVars:
@@ -24,7 +24,7 @@ services:
       - key: APPROVAL_POLICY
         value: once
       - key: LOCAL_TOOLS_ENABLED
-        value: false
+        value: true
       - key: LOCAL_TOOLS_REQUIRE_CONFIRMATION
         value: false
       - key: HERMES_ENABLED

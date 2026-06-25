@@ -149,6 +149,17 @@ app.innerHTML = `
       <button id="openNotepad">Abrir bloco de notas</button>
       <button id="listReminders">Lembretes ativos</button>
     </div>
+    <h3>▸ MARK-XLVI TOOLS</h3>
+    <div class="quick vertical">
+      <button id="toolSearch">🔍 Web Search</button>
+      <button id="toolWeather">🌤️ Clima</button>
+      <button id="toolFlight">✈️ Voos</button>
+      <button id="toolCode">💻 Code Helper</button>
+      <button id="toolGames">🎮 Games</button>
+      <button id="toolAgent">🤖 Agent</button>
+      <button id="toolReminder">⏰ Lembrete</button>
+    </div>
+    <div id="toolResult" class="log" style="font-size:0.75rem;margin-top:8px;max-height:120px;overflow:auto;"></div>
     <h3>▸ QUICK</h3>
     <div class="quick vertical">
       <button data-goto="cockpit">Cockpit</button>
@@ -529,6 +540,134 @@ events.onmessage = ev => {
 };
 events.onerror = () => {
   $('#logs').textContent = `[local] aguardando eventos...\n` + $('#logs').textContent.slice(0, 3000);
+};
+
+// ============================================================
+// MARK-XLVI TOOLS — Frontend handlers
+// ============================================================
+function toolResult(text) {
+  const el = $('#toolResult');
+  el.textContent = text;
+  el.scrollTop = 0;
+}
+
+async function callAgentTool(action, parameters = {}) {
+  try {
+    const r = await fetch('/api/agent', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action, parameters })
+    }).then(x => x.json());
+    return r;
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+function promptTool(msg, placeholder) {
+  const val = window.prompt(msg, placeholder);
+  return val;
+}
+
+$('#toolSearch').onclick = async () => {
+  const query = promptTool('Pesquisar na web:', 'pesquisa');
+  if (!query) return;
+  setMode('EXECUTING', '◈');
+  const r = await callAgentTool('web_search', { query });
+  if (r.ok && r.result) {
+    const output = r.result.output || JSON.stringify(r.result);
+    toolResult(output.substring(0, 500));
+    add('assistant', `Pesquisa: ${query} → ${output.substring(0, 200)}`);
+  } else {
+    toolResult('Erro: ' + (r.error || 'sem resposta'));
+  }
+  setMode('IDLE', '◎');
+};
+
+$('#toolWeather').onclick = async () => {
+  const city = promptTool('Cidade:', 'São Paulo');
+  if (!city) return;
+  setMode('EXECUTING', '◈');
+  const r = await callAgentTool('weather_report', { city });
+  if (r.ok && r.result) {
+    toolResult(r.result.output || JSON.stringify(r.result));
+    add('assistant', `Clima: ${city}`);
+  } else {
+    toolResult('Erro: ' + (r.error || 'sem resposta'));
+  }
+  setMode('IDLE', '◎');
+};
+
+$('#toolFlight').onclick = async () => {
+  const origin = promptTool('Origem (IATA):', 'GRU');
+  const dest = promptTool('Destino (IATA):', 'JFK');
+  const date = promptTool('Data (YYYY-MM-DD):', '2025-12-01');
+  if (!origin || !dest) return;
+  setMode('EXECUTING', '◈');
+  const r = await callAgentTool('flight_finder', { origin, destination: dest, date });
+  if (r.ok && r.result) {
+    toolResult(r.result.output || JSON.stringify(r.result));
+    add('assistant', `Voo: ${origin}→${dest}`);
+  } else {
+    toolResult('Erro: ' + (r.error || 'sem resposta'));
+  }
+  setMode('IDLE', '◎');
+};
+
+$('#toolCode').onclick = async () => {
+  const task = promptTool('O que você quer codar?', 'escreva uma função que ordena uma lista');
+  if (!task) return;
+  setMode('EXECUTING', '◈');
+  const r = await callAgentTool('code_helper', { task });
+  if (r.ok && r.result) {
+    toolResult(r.result.output || JSON.stringify(r.result));
+    add('assistant', `Code Helper: ${task.substring(0, 50)}`);
+  } else {
+    toolResult('Erro: ' + (r.error || 'sem resposta'));
+  }
+  setMode('IDLE', '◎');
+};
+
+$('#toolGames').onclick = async () => {
+  setMode('EXECUTING', '◈');
+  const r = await callAgentTool('game_updater', { action: 'list', platform: 'steam' });
+  if (r.ok && r.result) {
+    toolResult(r.result.output || JSON.stringify(r.result));
+    add('assistant', 'Games listados');
+  } else {
+    toolResult('Erro: ' + (r.error || 'sem resposta'));
+  }
+  setMode('IDLE', '◎');
+};
+
+$('#toolAgent').onclick = async () => {
+  const goal = promptTool('Objetivo do agente:', 'pesquise frameworks Python e resuma');
+  if (!goal) return;
+  setMode('EXECUTING', '◈');
+  const r = await callAgentTool('create_plan', { goal });
+  if (r.ok && r.result) {
+    toolResult(r.result.output || JSON.stringify(r.result));
+    add('assistant', `Agent plan: ${goal.substring(0, 50)}`);
+  } else {
+    toolResult('Erro: ' + (r.error || 'sem resposta'));
+  }
+  setMode('IDLE', '◎');
+};
+
+$('#toolReminder').onclick = async () => {
+  const name = promptTool('Nome do lembrete:', 'reunião');
+  const date = promptTool('Data (YYYY-MM-DD):', '2025-07-01');
+  const time = promptTool('Hora (HH:MM):', '14:00');
+  if (!name || !date) return;
+  setMode('EXECUTING', '◈');
+  const r = await callAgentTool('reminder', { action: 'set', name, date, time });
+  if (r.ok && r.result) {
+    toolResult(r.result.output || JSON.stringify(r.result));
+    add('assistant', `Lembrete: ${name} ${date} ${time}`);
+  } else {
+    toolResult('Erro: ' + (r.error || 'sem resposta'));
+  }
+  setMode('IDLE', '◎');
 };
 
 setInterval(() => $('#clock').textContent = new Date().toLocaleTimeString('pt-BR'), 1000);
