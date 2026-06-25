@@ -11,7 +11,9 @@ let recognition = SpeechRecognition ? new SpeechRecognition() : null;
 if (recognition) {
   recognition.lang = 'pt-BR';
   recognition.continuous = true;
-  recognition.interimResults = false;
+  recognition.interimResults = true;
+  window._voiceBuffer = '';
+  window._voiceFinalTimer = null;
 }
 
 app.innerHTML = `
@@ -405,6 +407,41 @@ async function handleVoiceTranscript(text) {
     return;
   }
 
+  // Comandos diretos de abrir (auto-aprova, não precisa do chat)
+  const openMatch = lower.match(/^(abrir|abre|abra)\s+(o|a|os|as|um|uma)?\s*(.+)$/);
+  if (openMatch) {
+    let target = openMatch[3].trim();
+    // Normalizar artigos
+    target = target.replace(/^(o|a|os|as|um|uma)\s+/i, '').trim();
+    if (!target) {
+      add('assistant', 'O que devo abrir? Diga o nome do app ou site.');
+      return;
+    }
+    const sendBtn = document.querySelector('#send');
+    if (sendBtn) sendBtn.disabled = true;
+    const r = await fetch('/api/local-tools', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'open_app', app: target })
+    }).then(x => x.json()).catch(e => ({ ok: false, text: e.message }));
+    if (sendBtn) sendBtn.disabled = false;
+    if (r?.requiresApproval) {
+      const approved = await approvePending(r.approval.token, true);
+      const msg = approved.text || (approved.ok ? `${target} aberto.` : 'Aprovação rejeitada.');
+      add('assistant', msg);
+      speak(msg);
+      return;
+    }
+    if (r?.ok === false) {
+      await send(raw);
+    } else {
+      const msg = r.text || `${target} aberto.`;
+      add('assistant', msg);
+      speak(msg);
+    }
+    return;
+  }
+
   await send(raw);
 }
 
@@ -548,8 +585,32 @@ $('#mic').onclick = () => {
 };
 if (recognition) {
   recognition.onresult = e => {
+    let interim = '';
+    let final = '';
+    for (let i = 0; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript;
+      if (e.results[i].isFinal) final += t;
+      else interim += t;
+    }
+    if (interim) {
+      add('user', interim.trim());
+      $('#input').value = interim.trim();
+    }
+    if (final) {
+      window._voiceBuffer = (window._voiceBuffer + ' ' + final.trim()).trim();
+      clearTimeout(window._voiceFinalTimer);
+      window._voiceFinalTimer = setTimeout(() => {
+        if (window._voiceBuffer) {
+          handleVoiceTranscript(window._voiceBuffer);
+          window._voiceBuffer = '';
+        }
+      }, 1200);
+    }
     const last = e.results[e.results.length - 1];
-    if (last?.isFinal) handleVoiceTranscript(last[0].transcript);
+    if (last?.isFinal && !final) {
+      clearTimeout(window._voiceFinalTimer);
+      handleVoiceTranscript(last[0].transcript);
+    }
   };
   recognition.onerror = e => {
     if (voiceActive && !['aborted', 'no-speech'].includes(e.error)) add('assistant', 'Microfone: ' + e.error);
