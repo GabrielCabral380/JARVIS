@@ -10,6 +10,8 @@ system/JARVIS-HISTORY.json
 system/JARVIS-MEMORY.md
 system/JARVIS-REMINDERS.json
 system/JARVIS-APPROVALS.json
+system/JARVIS-SCHEDULER.json
+system/JARVIS-SHORT-MEMORY.json
 
 # Node / OS noise
 node_modules/

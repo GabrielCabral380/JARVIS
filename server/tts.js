@@ -26,6 +26,16 @@ const PREFERRED_VOICES = {
 
 const DEFAULT_VOICE = PREFERRED_VOICES['pt-BR'];
 
+// Voice contexts — rate adjustments for different speaking styles
+const VOICE_CONTEXTS = {
+  default: { rate: '+0%', pitch: '+0Hz' },
+  formal: { rate: '-5%', pitch: '-2Hz' },
+  casual: { rate: '+10%', pitch: '+2Hz' },
+  urgent: { rate: '+15%', pitch: '+5Hz' },
+  calm: { rate: '-10%', pitch: '-3Hz' },
+  excited: { rate: '+20%', pitch: '+5Hz' },
+};
+
 // Python script that synthesizes and writes MP3 to stdout
 const TTS_SCRIPT = `
 import sys, asyncio, edge_tts
@@ -73,6 +83,7 @@ export async function synthesize(text, voiceOrOpts = DEFAULT_VOICE, opts = {}) {
   let rate = '+0%';
   let volume = '+0%';
   let pitch = '+0Hz';
+  let context = 'default';
 
   if (typeof voiceOrOpts === 'string') {
     voice = voiceOrOpts;
@@ -80,13 +91,20 @@ export async function synthesize(text, voiceOrOpts = DEFAULT_VOICE, opts = {}) {
       rate = opts.rate || '+0%';
       volume = opts.volume || '+0%';
       pitch = opts.pitch || '+0Hz';
+      if (opts.context && VOICE_CONTEXTS[opts.context]) context = opts.context;
     }
   } else if (voiceOrOpts && typeof voiceOrOpts === 'object') {
     voice = voiceOrOpts.voice || DEFAULT_VOICE;
     rate = voiceOrOpts.rate || '+0%';
     volume = voiceOrOpts.volume || '+0%';
     pitch = voiceOrOpts.pitch || '+0Hz';
+    if (voiceOrOpts.context && VOICE_CONTEXTS[voiceOrOpts.context]) context = voiceOrOpts.context;
   }
+
+  // Apply context adjustments
+  const ctx = VOICE_CONTEXTS[context] || VOICE_CONTEXTS.default;
+  if (!opts.rate && !voiceOrOpts?.rate) rate = ctx.rate;
+  if (!opts.pitch && !voiceOrOpts?.pitch) pitch = ctx.pitch;
 
   return new Promise((resolve, reject) => {
     const args = ['-c', TTS_SCRIPT, text, voice, rate, volume, pitch];
@@ -121,5 +139,5 @@ export async function listAllVoices() {
   });
 }
 
-export { DEFAULT_VOICE, PREFERRED_VOICES };
+export { DEFAULT_VOICE, PREFERRED_VOICES, VOICE_CONTEXTS };
 export const listVoices = listPreferredVoices;

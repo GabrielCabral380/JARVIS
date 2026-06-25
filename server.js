@@ -7,6 +7,10 @@ import { spawn, execFile } from 'node:child_process';
 import { synthesize as ttsSynthesize, listVoices as ttsVoices } from './server/tts.js';
 import { runFileOp, runMediaOp, runSystemOp, runSmartHomeOp, runTranslateOp, runCalcOp, executeCommand } from './server/executor.js';
 import { findActions, getCapabilitiesList, getAllActions } from './server/capabilities.js';
+import { planTask, executePlan, classifyAgent as classifyAgentType, AGENT_TYPES } from './server/agents.js';
+import { executeTool, listTools } from './server/tools.js';
+import { createTask, listTasks, getTask, updateTask, deleteTask, getDueTasks, nlToCron } from './server/scheduler.js';
+import { addMessage, getRecentMessages, remember, recall, recallByPattern, memoryStats, clearMessages } from './server/short-memory.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1342,6 +1346,9 @@ async function handleChat(message) {
   history.push({ ts: new Date().toISOString(), user, assistant: text, provider, agent });
   saveHistory(history);
   appendMemory(user, text);
+  // Short-term memory: auto-log conversation
+  addMessage('user', user);
+  addMessage('assistant', text);
   log('chat', { agent, provider, message: user.slice(0, 120) });
   return response;
 }
@@ -1519,6 +1526,85 @@ const server = http.createServer(async (req, res) => {
       const body = await readJsonBody(req);
       const result = await executeCommand(body);
       return sendJson(res, result.ok ? 200 : 400, result);
+    }
+
+    // ─── TOOLS ───
+    if (req.method === 'GET' && pathname === '/api/tools') {
+      return sendJson(res, 200, { ok: true, tools: listTools() });
+    }
+
+    if (req.method === 'POST' && pathname === '/api/tools/run') {
+      const body = await readJsonBody(req);
+      const result = await executeTool(body.name || '', body.params || {});
+      return sendJson(res, result.ok ? 200 : 400, result);
+    }
+
+    // ─── AGENTS ───
+    if (req.method === 'POST' && pathname === '/api/agents/plan') {
+      const body = await readJsonBody(req);
+      const plan = planTask(body.goal || '');
+      return sendJson(res, 200, { ok: true, plan });
+    }
+
+    if (req.method === 'POST' && pathname === '/api/agents/execute') {
+      const body = await readJsonBody(req);
+      const result = await executePlan(body.goal || '');
+      return sendJson(res, result.completed > 0 ? 200 : 400, result);
+    }
+
+    if (req.method === 'GET' && pathname === '/api/agents/types') {
+      return sendJson(res, 200, { ok: true, types: AGENT_TYPES });
+    }
+
+    // ─── SCHEDULER ───
+    if (req.method === 'GET' && pathname === '/api/scheduler/tasks') {
+      return sendJson(res, 200, { ok: true, tasks: listTasks() });
+    }
+
+    if (req.method === 'POST' && pathname === '/api/scheduler/tasks') {
+      const body = await readJsonBody(req);
+      const cron = body.cron || nlToCron(body.schedule || '');
+      const task = createTask({
+        name: body.name || 'Sem nome',
+        cron,
+        action: body.action || {},
+        description: body.description || '',
+      });
+      return sendJson(res, 201, { ok: true, task });
+    }
+
+    if (req.method === 'DELETE' && pathname === '/api/scheduler/tasks/:id') {
+      const id = pathname.split('/').pop();
+      const deleted = deleteTask(id);
+      return sendJson(res, deleted ? 200 : 404, { ok: deleted });
+    }
+
+    // ─── SHORT MEMORY ───
+    if (req.method === 'GET' && pathname === '/api/memory') {
+      return sendJson(res, 200, { ok: true, stats: memoryStats() });
+    }
+
+    if (req.method === 'POST' && pathname === '/api/memory/remember') {
+      const body = await readJsonBody(req);
+      remember(body.key || '', body.value);
+      return sendJson(res, 200, { ok: true, key: body.key });
+    }
+
+    if (req.method === 'POST' && pathname === '/api/memory/recall') {
+      const body = await readJsonBody(req);
+      const value = recall(body.key || '');
+      return sendJson(res, value ? 200 : 404, { ok: value !== null, key: body.key, value });
+    }
+
+    if (req.method === 'POST' && pathname === '/api/memory/search') {
+      const body = await readJsonBody(req);
+      const results = recallByPattern(body.query || '');
+      return sendJson(res, 200, { ok: true, results });
+    }
+
+    if (req.method === 'DELETE' && pathname === '/api/memory') {
+      clearMessages();
+      return sendJson(res, 200, { ok: true });
     }
 
     if (req.method === 'GET' && pathname === '/api/tts/voices') {
