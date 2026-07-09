@@ -740,21 +740,22 @@ function localReply(cmd) {
   //
   function tryOpenApp(appName) {
     const a = appName.toLowerCase().trim();
+    const userFolder = 'Usuario';
     const prot = {
       'calculadora': 'ms-calculator:', 'calc': 'ms-calculator:', 'calculador': 'ms-calculator:',
       'bloco de notas': 'notepad:', 'notepad': 'notepad:', 'bloco': 'notepad:', 'notas': 'notepad:',
       'paint': 'ms-paint:', 'pintura': 'ms-paint:',
       'explorador': 'file:///C:/', 'arquivos': 'file:///C:/', 'gerenciador de arquivos': 'file:///C:/',
-      'documentos': 'file:///C://Users/' + (process?.env?.USERNAME || 'Usuario') + '/Documents',
-      'downloads': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Downloads',
-      'música': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Music',
-      'musica': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Music',
-      'imagens': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Pictures',
-      'fotos': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Pictures',
-      'vídeos': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Videos',
-      'videos': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Videos',
-      'desktop': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Desktop',
-      'area de trabalho': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Desktop',
+      'documentos': 'file:///C://Users/' + userFolder + '/Documents',
+      'downloads': 'file:///C:/Users/' + userFolder + '/Downloads',
+      'música': 'file:///C:/Users/' + userFolder + '/Music',
+      'musica': 'file:///C:/Users/' + userFolder + '/Music',
+      'imagens': 'file:///C:/Users/' + userFolder + '/Pictures',
+      'fotos': 'file:///C:/Users/' + userFolder + '/Pictures',
+      'vídeos': 'file:///C:/Users/' + userFolder + '/Videos',
+      'videos': 'file:///C:/Users/' + userFolder + '/Videos',
+      'desktop': 'file:///C:/Users/' + userFolder + '/Desktop',
+      'area de trabalho': 'file:///C:/Users/' + userFolder + '/Desktop',
       'configurações': 'ms-settings:', 'configuracoes': 'ms-settings:', 'config': 'ms-settings:',
       'painel de controle': 'control:', 'painel': 'control:',
       'terminal': 'wt:', 'cmd': 'cmd:', 'prompt': 'cmd:',
