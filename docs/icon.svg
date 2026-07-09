@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="JARVIS icon">
+  <defs>
+    <radialGradient id="g" cx="50%" cy="42%" r="60%">
+      <stop offset="0%" stop-color="#8ff7ff"/>
+      <stop offset="42%" stop-color="#46dfff"/>
+      <stop offset="100%" stop-color="#05202c"/>
+    </radialGradient>
+    <linearGradient id="ring" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#d9fbff" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#67e7ff" stop-opacity="0.15"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="#050b10"/>
+  <circle cx="256" cy="256" r="154" fill="url(#g)" stroke="url(#ring)" stroke-width="10"/>
+  <circle cx="256" cy="256" r="106" fill="none" stroke="#bffbff" stroke-width="6" stroke-dasharray="8 18" opacity="0.85"/>
+  <circle cx="256" cy="256" r="62" fill="#07161d" stroke="#84efff" stroke-width="5"/>
+  <circle cx="256" cy="256" r="14" fill="#d9fbff"/>
+</svg>
