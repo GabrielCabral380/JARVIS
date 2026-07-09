@@ -1,4 +1,4 @@
-const CACHE_NAME = 'jarvis-cloud-v1';
+const CACHE_NAME = 'jarvis-cloud-v3';
 const ASSETS = [
   './',
   './index.html',
