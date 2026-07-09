@@ -625,7 +625,7 @@ function inferLocalSkill(message = '') {
 
   if (/(abrir|abra|abre|iniciar|inicie).*calculadora|\bcalculadora\b|\bcalcular\b/i.test(lower)) return { action: 'open_app', app: 'calculator' };
 
-  const app = lower.match(/(?:abrir|abra|abre|iniciar|inicie)\s+(?:o\s+|a\s+)?(bloco de notas|notepad|explorer|explorador|paint|terminal|powershell|cmd|vscode|visual studio code|chrome|edge|firefox)/i);
+  const app = lower.match(/(?:abrir|abra|abre|iniciar|inicie)\s+(?:o\s+|a\s+)?(word|excel|powerpoint|power point|outlook|onenote|access|publisher|bloco de notas|notepad|explorer|explorador|arquivos|documentos|downloads|desktop|task manager|gerenciador de tarefas|tarefas|paint|terminal|powershell|cmd|vscode|visual studio code|chrome|edge|firefox)/i);
   if (app) return { action: 'open_app', app: app[1] };
 
   // ─── FILE OPERATIONS ───
@@ -729,10 +729,25 @@ async function runNativeLocalSkill(skill) {
     const map = {
       'calculator': process.platform === 'win32' ? 'calc.exe' : 'gnome-calculator',
       'calculadora': process.platform === 'win32' ? 'calc.exe' : 'gnome-calculator',
+      'word': process.platform === 'win32' ? 'WINWORD.EXE' : 'libreoffice',
+      'excel': process.platform === 'win32' ? 'EXCEL.EXE' : 'libreoffice',
+      'powerpoint': process.platform === 'win32' ? 'POWERPNT.EXE' : 'libreoffice',
+      'power point': process.platform === 'win32' ? 'POWERPNT.EXE' : 'libreoffice',
+      'outlook': process.platform === 'win32' ? 'OUTLOOK.EXE' : 'libreoffice',
+      'onenote': process.platform === 'win32' ? 'ONENOTE.EXE' : 'libreoffice',
+      'access': process.platform === 'win32' ? 'MSACCESS.EXE' : 'libreoffice',
+      'publisher': process.platform === 'win32' ? 'MSPUB.EXE' : 'libreoffice',
       'bloco de notas': 'notepad.exe',
       'notepad': 'notepad.exe',
       'explorer': 'explorer.exe',
       'explorador': 'explorer.exe',
+      'arquivos': 'explorer.exe',
+      'documentos': 'explorer.exe',
+      'downloads': 'explorer.exe',
+      'desktop': 'explorer.exe',
+      'task manager': 'taskmgr.exe',
+      'gerenciador de tarefas': 'taskmgr.exe',
+      'tarefas': 'taskmgr.exe',
       'paint': 'mspaint.exe',
       'terminal': process.platform === 'win32' ? 'wt.exe' : 'x-terminal-emulator',
       'powershell': 'powershell.exe',

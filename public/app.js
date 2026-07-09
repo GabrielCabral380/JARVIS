@@ -6,6 +6,7 @@ let config = {};
 let voiceActive = false;
 let recognitionStarting = false;
 let approvalState = { policy: 'once', trusted: [], pending: [] };
+let replyTone = localStorage.getItem('jarvis-reply-tone') || 'natural';
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 let recognition = SpeechRecognition ? new SpeechRecognition() : null;
 if (recognition) {
@@ -155,16 +156,25 @@ app.innerHTML = `
     <div id="localRuntime" class="orchestrator">Carregando runtime...</div>
     <div id="approvalBox" class="orchestrator">Aprovações: carregando...</div>
     <div class="voice-hint">
-      Voz ativa aceita: “Jarvis, abra a calculadora”, “pesquise IA na internet”,
-      “liste meus lembretes”, “envie para Hermes: ...”, “detecte MCP Hermes OpenClaw”.
+      Voz ativa aceita: “Jarvis, abra a calculadora”, “abra o Word”, “abra os arquivos”, “pesquise IA na internet”,
+      “responda curto”, “responda natural”, “liste meus lembretes”, “envie para Hermes: ...”, “detecte MCP Hermes OpenClaw”.
     </div>
     <input id="localQuery" placeholder="pesquisar na internet..."/>
     <div class="quick vertical">
       <button id="openBrowser">Abrir navegador</button>
       <button id="searchWeb">Pesquisar internet</button>
       <button id="openCalc">Abrir calculadora</button>
+      <button id="openWord">Abrir Word</button>
+      <button id="openExcel">Abrir Excel</button>
+      <button id="openFiles">Abrir arquivos</button>
+      <button id="openTaskManager">Abrir tarefas</button>
       <button id="openNotepad">Abrir bloco de notas</button>
       <button id="listReminders">Lembretes ativos</button>
+    </div>
+    <div class="quick vertical" style="margin-top:8px">
+      <button id="toneShort">Respostas curtas</button>
+      <button id="toneNatural">Modo natural</button>
+      <button id="toneDetailed">Mais detalhes</button>
     </div>
     <h3>▸ QUICK</h3>
     <div class="quick vertical">
@@ -384,6 +394,17 @@ function normalizeSpokenCommand(text = '') {
     .trim();
 }
 
+function setReplyTone(tone) {
+  replyTone = tone;
+  localStorage.setItem('jarvis-reply-tone', tone);
+}
+
+function replyTonePrefix() {
+  if (replyTone === 'short') return 'Responda em português brasileiro, de forma curta, direta e natural. '; 
+  if (replyTone === 'detailed') return 'Responda em português brasileiro, com mais detalhes, mas sem enrolação. ';
+  return 'Responda em português brasileiro de forma natural, amigável e objetiva. ';
+}
+
 async function handleVoiceTranscript(text) {
   const raw = String(text || '').trim();
   const cmd = normalizeSpokenCommand(raw);
@@ -402,6 +423,22 @@ async function handleVoiceTranscript(text) {
     return;
   }
 
+  if (/^(responda curto|seja breve|mais curto)$/.test(lower)) {
+    setReplyTone('short');
+    add('assistant', 'Certo. Vou responder de forma mais curta.');
+    return;
+  }
+  if (/^(responda detalhado|mais detalhes|explique melhor)$/.test(lower)) {
+    setReplyTone('detailed');
+    add('assistant', 'Certo. Vou responder com mais detalhes.');
+    return;
+  }
+  if (/^(responda natural|fale mais natural|fale como gente|modo natural)$/.test(lower)) {
+    setReplyTone('natural');
+    add('assistant', 'Certo. Vou falar de um jeito mais natural.');
+    return;
+  }
+
   if (/^(detectar|diagnosticar|verificar).*(mcp|hermes|openclaw|open claw)/.test(lower)) {
     await send('Jarvis, detecte MCP Hermes OpenClaw');
     return;
@@ -411,8 +448,16 @@ async function handleVoiceTranscript(text) {
   const openMatch = lower.match(/^(abrir|abre|abra)\s+(o|a|os|as|um|uma)?\s*(.+)$/);
   if (openMatch) {
     let target = openMatch[3].trim();
-    // Normalizar artigos
+    // Normalizar artigos e sinônimos
     target = target.replace(/^(o|a|os|as|um|uma)\s+/i, '').trim();
+    const aliases = {
+      'word': 'word', 'excel': 'excel', 'powerpoint': 'powerpoint', 'power point': 'powerpoint',
+      'bloco de notas': 'notepad', 'notas': 'notepad', 'notepad': 'notepad',
+      'arquivos': 'explorer', 'explorador': 'explorer', 'pasta': 'explorer', 'documentos': 'explorer', 'downloads': 'explorer', 'desktop': 'explorer',
+      'calculadora': 'calculator', 'calc': 'calculator',
+      'gerenciador de tarefas': 'taskmgr', 'tarefas': 'taskmgr', 'task manager': 'taskmgr'
+    };
+    target = aliases[target] || target;
     if (!target) {
       add('assistant', 'O que devo abrir? Diga o nome do app ou site.');
       return;
@@ -448,13 +493,18 @@ async function handleVoiceTranscript(text) {
 async function send(text) {
   text = (text || $('#input').value).trim();
   if (!text) return;
+  const lower = text.toLowerCase();
+  if (/^(responda curto|seja breve|mais curto)$/.test(lower)) { setReplyTone('short'); add('assistant', 'Certo. Vou responder de forma mais curta.'); return; }
+  if (/^(responda detalhado|mais detalhes|explique melhor)$/.test(lower)) { setReplyTone('detailed'); add('assistant', 'Certo. Vou responder com mais detalhes.'); return; }
+  if (/^(responda natural|fale mais natural|fale como gente|modo natural)$/.test(lower)) { setReplyTone('natural'); add('assistant', 'Certo. Vou falar de um jeito mais natural.'); return; }
   $('#input').value = '';
   add('user', text);
   setMode('THINKING', '◌');
+  const prompt = `${replyTonePrefix()}${text}`;
   const res = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ message: text })
+    body: JSON.stringify({ message: prompt })
   }).then(r => r.json());
   if (res?.requiresApproval) {
     add('assistant', res.text || 'Aprovação necessária.');
@@ -504,6 +554,9 @@ async function checkDueReminders() {
 document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => activateTab(b.dataset.tab));
 document.querySelectorAll('[data-goto]').forEach(b => b.onclick = () => activateTab(b.dataset.goto));
 $('#send').onclick = () => send();
+$('#toneShort').onclick = () => { setReplyTone('short'); add('assistant', 'Certo. Vou responder curto.'); };
+$('#toneNatural').onclick = () => { setReplyTone('natural'); add('assistant', 'Certo. Vou responder de forma mais natural.'); };
+$('#toneDetailed').onclick = () => { setReplyTone('detailed'); add('assistant', 'Certo. Vou responder com mais detalhes.'); };
 $('#input').addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
 $('#diagnose').onclick = () => send('JARVIS, diagnostique o sistema e diga o que está rodando.');
 $('#stopVoice').onclick = () => {
@@ -571,6 +624,10 @@ $('#searchWeb').onclick = () => {
   runLocalTool({ action: 'search_web', query });
 };
 $('#openCalc').onclick = () => runLocalTool({ action: 'open_app', app: 'calculator' });
+$('#openWord').onclick = () => runLocalTool({ action: 'open_app', app: 'word' });
+$('#openExcel').onclick = () => runLocalTool({ action: 'open_app', app: 'excel' });
+$('#openFiles').onclick = () => runLocalTool({ action: 'open_app', app: 'explorer' });
+$('#openTaskManager').onclick = () => runLocalTool({ action: 'open_app', app: 'task manager' });
 $('#openNotepad').onclick = () => runLocalTool({ action: 'open_app', app: 'notepad' });
 $('#listReminders').onclick = () => send('listar lembretes');
 
