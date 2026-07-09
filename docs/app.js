@@ -39,11 +39,17 @@ function saveConfig(p) { const c = loadConfig(); Object.assign(c, p); Store.set(
 function loadMemory() { return Store.get('memory', []); }
 function saveMemory(m) { Store.set('memory', m.slice(-200)); }
 function appendMemory(role, text) { const m = loadMemory(); m.push({ role, text: String(text).slice(0, 1200), ts: new Date().toISOString() }); saveMemory(m); }
+function loadNotes() { return Store.get('notes', []); }
+function saveNotes(notes) { Store.set('notes', notes.slice(-100)); }
+function addNote(text) { const notes = loadNotes(); const note = { id: Date.now().toString(36), text: String(text).trim(), created: new Date().toISOString() }; notes.push(note); saveNotes(notes); return note; }
+function listNotes() { return loadNotes(); }
+function clearNotes() { Store.set('notes', []); }
 function exportJarvisData() {
   return {
     config: loadConfig(),
     memory: loadMemory(),
     reminders: loadReminders(),
+    notes: loadNotes(),
     alarms,
     approvals: loadApprovals(),
     userName,
@@ -56,6 +62,7 @@ function importJarvisData(data) {
   if (data.config) Store.set('config', { ...DEFAULTS, ...data.config });
   if (Array.isArray(data.memory)) saveMemory(data.memory);
   if (Array.isArray(data.reminders)) saveReminders(data.reminders);
+  if (Array.isArray(data.notes)) saveNotes(data.notes);
   if (Array.isArray(data.alarms)) { alarms = data.alarms; saveAlarms(); }
   if (data.approvals && typeof data.approvals === 'object') saveApprovals(data.approvals);
   if (typeof data.userName === 'string') { userName = data.userName; localStorage.setItem('jarvis-username', userName); }
@@ -455,6 +462,11 @@ function localReply(cmd) {
     return 'Voltando para a tela principal.';
   }
 
+  // tom de conversa
+  if (compact.includes('responda curto') || compact.includes('seja breve') || compact.includes('mais curto')) return 'Certo, vou ser mais direto.';
+  if (compact.includes('responda mais detalhado') || compact.includes('explique melhor') || compact.includes('mais detalhes')) return 'Certo, vou detalhar mais.';
+  if (compact.includes('mais natural') || compact.includes('fala mais natural') || compact.includes('fale como gente')) return 'Entendido. Vou falar de um jeito mais natural.';
+
   // atalhos diretos de apps
   const directApps = {
     'word': 'word', 'excel': 'excel', 'powerpoint': 'powerpoint', 'power point': 'powerpoint',
@@ -462,13 +474,15 @@ function localReply(cmd) {
     'bloco de notas': 'bloco de notas', 'notepad': 'bloco de notas', 'notas': 'bloco de notas',
     'calculadora': 'calculadora', 'calc': 'calculadora', 'paint': 'paint', 'pintura': 'paint',
     'terminal': 'terminal', 'cmd': 'cmd', 'prompt': 'cmd', 'vscode': 'vscode', 'visual studio code': 'vscode',
-    'explorador': 'explorador', 'arquivos': 'explorador', 'desktop': 'desktop', 'downloads': 'downloads', 'documentos': 'documentos',
-    'imagens': 'imagens', 'fotos': 'fotos', 'vídeos': 'videos', 'videos': 'videos', 'configurações': 'config', 'configuracoes': 'config', 'config': 'config'
+    'explorador': 'explorador', 'arquivos': 'explorador', 'pasta': 'explorador', 'desktop': 'desktop', 'downloads': 'downloads', 'documentos': 'documentos',
+    'imagens': 'imagens', 'fotos': 'fotos', 'vídeos': 'videos', 'videos': 'videos', 'configurações': 'config', 'configuracoes': 'config', 'config': 'config',
+    'gerenciador de tarefas': 'task manager', 'tarefas': 'task manager'
   };
   if (directApps[compact]) {
+    if (directApps[compact] === 'config') { document.querySelector('.tab[data-tab="config"]')?.click(); return 'Abrindo configurações.'; }
+    if (directApps[compact] === 'task manager') { window.open('taskmgr:', '_blank'); return 'Abrindo Gerenciador de Tarefas.'; }
     const quick = tryOpenApp(directApps[compact]);
     if (quick) return quick;
-    if (directApps[compact] === 'config') { document.querySelector('.tab[data-tab="config"]')?.click(); return 'Abrindo configurações.'; }
   }
 
   // backup / restauração local
@@ -476,11 +490,24 @@ function localReply(cmd) {
     downloadJsonFile('jarvis-backup-' + new Date().toISOString().slice(0, 10) + '.json', exportJarvisData());
     return 'Backup pronto. Baixei um arquivo com seus dados.';
   }
+  if (compact.includes('importar meus dados') || compact.includes('restaurar backup') || compact.includes('carregar backup')) {
+    return 'Use o botão Importar para carregar um backup JSON.';
+  }
   if (compact.includes('resetar dados') || compact.includes('limpar tudo') || compact.includes('zerar meus dados')) {
     localStorage.clear();
     location.reload();
     return 'Vou reiniciar tudo para você.';
   }
+
+  // notas rápidas
+  const noteMatch = cmd.match(/(?:anote|salve|guardar|registre|nota)\s+(?:que\s+)?(.+)/i);
+  if (noteMatch) { addNote(noteMatch[1].trim()); return 'Anotado. Guardei isso para você.'; }
+  if (compact.includes('listar notas') || compact.includes('mostrar notas') || compact.includes('ver notas')) {
+    const notes = listNotes();
+    if (!notes.length) return 'Nenhuma nota salva.';
+    return 'Notas:\n' + notes.slice(-8).map(n => '• ' + n.text).join('\n');
+  }
+  if (compact.includes('limpar notas') || compact.includes('apagar notas') || compact.includes('remover notas')) { clearNotes(); return 'Notas apagadas.'; }
 
   // -- RESPOSTAS A PERGUNTAS DO JARVIS --
   if (lastQuestion) {
@@ -587,6 +614,7 @@ function localReply(cmd) {
   if ((text.includes('quem sou eu') || text.includes('meu nome')) && userName) {
     return 'Você é ' + userName + ', Senhor.';
   }
+  if (text.includes('como devo falar') || text.includes('fala comigo') || text.includes('modo natural')) return 'Pode falar como quiser. Eu tento entender do jeito mais natural possível.';
 
   // -- STATUS --
   if (text === 'status' || text.includes('como você está') || text.includes('tudo bem'))
@@ -908,16 +936,17 @@ function localReply(cmd) {
   // -- AJUDA --
   if (text.includes('ajuda') || text.includes('help') || text.includes('o que você faz') || text.includes('o que voce faz') || text.includes('comandos') || text === 'menu' || text === 'opções' || text === 'opcoes')
     return `Posso ajudar com:
-• Abrir apps: "abre a calculadora", "abre o terminal", "abre o bloco de notas"
+• Abrir apps: "abre o Word", "abre o Excel", "abre o bloco de notas", "abre os arquivos"
 • Web: "abre o YouTube", "abre o Gmail", "abre o WhatsApp"
 • Pesquisa: "pesquisar salário de programador"
-• Resumos e texto: "resuma isso", "explique de forma simples", "traduza para inglês", "melhore esse texto"
+• Texto: "resuma isso", "explique melhor", "traduza para inglês", "melhore esse texto"
+• Notas: "anote que...", "listar notas", "limpar notas"
 • Lembretes: "lembre de pagar o boleto em 10 min"
 • Hora, data, clima
-• Backup: "fazer backup", "baixar meus dados", "limpar tudo"
+• Backup: "fazer backup", "importar meus dados", "limpar tudo"
 • Config: "abrir configurações", "voltar para páginas"
-• Conversar: "vamos conversar"
-Diga de um jeito natural que eu tento entender.`;
+• Conversar: "vamos conversar", "responda curto", "mais natural"
+Diga do seu jeito que eu entendo.`;
 
   // -- MODO SEGURO --
   if (text.includes('modo seguro') || text.includes('safe mode')) { safeMode = !safeMode; return safeMode ? 'Modo seguro ativado.' : 'Modo seguro desativado.'; }
@@ -1056,12 +1085,12 @@ function renderApp() {
 
   APP.innerHTML = `<header class="topbar"><div class="brand">J·A·R·V·I·S</div><nav><button class="tab active" data-tab="pages">Pages</button><button class="tab" data-tab="config">Config</button></nav><div class="clock" id="clock">--:--:--</div></header>
   <section class="layout">
-    <aside class="panel left"><h3>◉ STATUS</h3><div id="status" class="orchestrator">${hasAI ? 'IA: ' + aiLabel : 'Modo local. Configure em Config.'}</div><h3>◉ VOZ</h3><div id="voiceStatus" class="orchestrator">Pronta.</div><h3>◉ MEMÓRIA</h3><div id="memStatus" class="orchestrator">${loadMemory().length} entradas • ${listReminders().length} lembretes • ${listAlarms().length} alarmes</div></aside>
+    <aside class="panel left"><h3>◉ STATUS</h3><div id="status" class="orchestrator">${hasAI ? 'IA: ' + aiLabel : 'Modo local. Configure em Config.'}</div><h3>◉ VOZ</h3><div id="voiceStatus" class="orchestrator">Pronta.</div><h3>◉ MEMÓRIA</h3><div id="memStatus" class="orchestrator">${loadMemory().length} entradas • ${loadNotes().length} notas • ${listReminders().length} lembretes • ${listAlarms().length} alarmes</div></aside>
     <main class="center">
-      <section class="screen tabpage active" id="tab-pages"><div class="orb-wrap"><div class="orb"><div class="face"><h1 id="mood">◎</h1><p id="mode">PAGES</p></div></div></div><div class="chatbox" id="messages"></div><div class="composer"><input id="commandInput" placeholder="Diga ou digite seu comando..." /><button id="sendCommand">Enviar</button></div><div class="quick"><button id="testVoice">🔊 Testar voz</button><button id="startVoice">🎙️ Falar</button><button id="stopVoice" style="display:none">⏹️ Parar</button><button id="openYouTube">📺 YouTube</button><button id="openBrowser">🌐 Pesquisar</button></div><div class="quick" style="margin-top:8px"><button id="openChatGPT">🤖 ChatGPT</button><button id="openChatGPTImage">🎨 Criar Imagem</button><button id="openChatGPTCode">💻 Programar</button><button id="exportData">📦 Backup</button><button id="importData">📥 Importar</button><button id="resetData">🧹 Limpar</button></div><p class="muted">Voz contínua. Programas do PC. ChatGPT. Diálogo natural. Diga "ajuda".</p></section>
+      <section class="screen tabpage active" id="tab-pages"><div class="orb-wrap"><div class="orb"><div class="face"><h1 id="mood">◎</h1><p id="mode">PAGES</p></div></div></div><div class="chatbox" id="messages"></div><div class="composer"><input id="commandInput" placeholder="Diga ou digite seu comando..." /><button id="sendCommand">Enviar</button></div><div class="quick"><button id="testVoice">🔊 Testar voz</button><button id="startVoice">🎙️ Falar</button><button id="stopVoice" style="display:none">⏹️ Parar</button><button id="openYouTube">📺 YouTube</button><button id="openBrowser">🌐 Pesquisar</button></div><div class="quick" style="margin-top:8px"><button id="openChatGPT">🤖 ChatGPT</button><button id="openChatGPTImage">🎨 Criar Imagem</button><button id="openChatGPTCode">💻 Programar</button><button id="exportData">📦 Backup</button><button id="importData">📥 Importar</button><button id="resetData">🧹 Limpar</button><button id="openNotes">📝 Notas</button></div><p class="muted">Voz contínua. Programas do PC. ChatGPT. Diálogo natural. Diga "ajuda".</p></section>
       <section class="screen tabpage" id="tab-config"><h2>⚙️ Configuração</h2><div id="configPanel"></div></section>
     </main>
-    <aside class="panel right"><h3>▸ OBSERVAÇÕES</h3><div class="orchestrator"><p><b>Pages:</b> ativo.</p><p><b>JARVIS v4.1</b></p><p>Voz contínua.</p><p>Diálogo natural.</p></div><h3>▸ ORQUESTRADOR</h3><div id="orchestratorStatus" class="orchestrator">Verificando...</div></aside>
+    <aside class="panel right"><h3>▸ OBSERVAÇÕES</h3><div class="orchestrator"><p><b>Pages:</b> ativo.</p><p><b>JARVIS v4.2</b></p><p>Voz contínua.</p><p>Diálogo natural.</p></div><h3>▸ ORQUESTRADOR</h3><div id="orchestratorStatus" class="orchestrator">Verificando...</div></aside>
   </section>`;
 
   // Tabs
@@ -1082,6 +1111,20 @@ function renderApp() {
   $('#openChatGPT')?.addEventListener('click', () => { window.open('https://chat.openai.com/?model=auto', '_blank'); addMessage('<b>JARVIS:</b> 🤖 Abrindo ChatGPT.', 'assistant'); speak('Abrindo ChatGPT.'); });
   $('#openChatGPTImage')?.addEventListener('click', () => { const q = prompt('Descreva a imagem:'); if (q) { window.open('https://chat.openai.com/?model=auto', '_blank'); addMessage('<b>JARVIS:</b> 🎨 ChatGPT aberto. Cole: "Crie uma imagem de ' + q + '"', 'assistant'); speak('ChatGPT aberto. Cole o prompt de imagem.'); } });
   $('#openChatGPTCode')?.addEventListener('click', () => { const q = prompt('O que o programa deve fazer?'); if (q) { window.open('https://chat.openai.com/?model=auto', '_blank'); addMessage('<b>JARVIS:</b> 💻 ChatGPT aberto. Cole: "Escreva um programa que ' + q + '"', 'assistant'); speak('ChatGPT aberto. Cole o prompt de programação.'); } });
+  $('#openNotes')?.addEventListener('click', () => {
+    const notes = listNotes();
+    const q = prompt(notes.length ? 'Digite uma nova nota ou deixe vazio para listar:' : 'Digite uma nota para salvar:');
+    if (q === null) return;
+    if (q.trim()) {
+      addNote(q.trim());
+      addMessage('<b>JARVIS:</b> Nota salva.', 'assistant');
+      speak('Nota salva.');
+      renderApp();
+      return;
+    }
+    const msg = notes.length ? 'Notas:\n' + notes.slice(-8).map(n => '• ' + n.text).join('\n') : 'Nenhuma nota salva.';
+    addMessage('<b>JARVIS:</b> ' + esc(msg).replace(/\n/g, '<br/>'), 'assistant');
+  });
   $('#exportData')?.addEventListener('click', () => { downloadJsonFile('jarvis-backup-' + new Date().toISOString().slice(0, 10) + '.json', exportJarvisData()); addMessage('<b>JARVIS:</b> Backup baixado.', 'assistant'); speak('Backup baixado.'); });
   $('#importData')?.addEventListener('click', () => {
     const input = document.createElement('input');
