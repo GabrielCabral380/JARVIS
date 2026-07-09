@@ -633,8 +633,9 @@ function localReply(cmd) {
   }
 
   // -- YOUTUBE --
-  if (text.includes('youtube') || text.includes('abrir yt') || text === 'yt') { window.open('https://www.youtube.com', '_blank'); return 'Abrindo YouTube.'; }
-  const ytM = text.match(/(?:pesquisar|buscar|procurar|tocar|ouvir)\s+(?:no\s+)?youtube\s+(.+)/i) || text.match(/youtube\s+(.+)/i);
+  const wantsYouTube = /you\s*tube/i.test(text) || text.includes('youtube') || text.includes('abrir yt') || text === 'yt';
+  if (wantsYouTube) { window.open('https://www.youtube.com', '_blank'); return 'Abrindo YouTube.'; }
+  const ytM = text.match(/(?:pesquisar|buscar|procurar|tocar|ouvir)\s+(?:no\s+)?you\s*tube\s+(.+)/i) || text.match(/(?:pesquisar|buscar|procurar|tocar|ouvir)\s+(?:no\s+)?youtube\s+(.+)/i) || text.match(/you\s*tube\s+(.+)/i) || text.match(/youtube\s+(.+)/i);
   if (ytM) { window.open('https://www.youtube.com/results?search_query=' + encodeURIComponent(ytM[1].trim()), '_blank'); return 'Pesquisando "' + ytM[1].trim() + '" no YouTube.'; }
 
   // -- PESQUISA --
@@ -688,8 +689,9 @@ function localReply(cmd) {
   if (text.includes('reddit')) { window.open('https://www.reddit.com', '_blank'); return 'Abrindo Reddit.'; }
 
   // -- STREAMING --
+  const wantsSpotify = /spot\s*fy/i.test(text) || text.includes('spotify');
   if (text.includes('netflix')) { window.open('https://www.netflix.com', '_blank'); return 'Abrindo Netflix.'; }
-  if (text.includes('spotify')) { window.open('https://open.spotify.com', '_blank'); return 'Abrindo Spotify.'; }
+  if (wantsSpotify) { window.open('https://open.spotify.com', '_blank'); return 'Abrindo Spotify.'; }
   if (text.includes('disney') || text.includes('disney+')) { window.open('https://www.disneyplus.com', '_blank'); return 'Abrindo Disney+.'; }
   if (text.includes('hbo') || text.includes('max')) { window.open('https://www.max.com', '_blank'); return 'Abrindo HBO Max.'; }
   if (text.includes('prime video') || text.includes('amazon prime')) { window.open('https://www.primevideo.com', '_blank'); return 'Abrindo Prime Video.'; }
