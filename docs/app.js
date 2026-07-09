@@ -395,6 +395,10 @@ async function callOllama(url, model, msgs) {
 async function aiChat(msg) {
   const c = loadConfig();
 
+  const safeLocal = (fallbackMsg) => {
+    try { return localReply(fallbackMsg); } catch (err) { return 'Erro local: ' + err.message; }
+  };
+
   // Modo ChatGPT ativo — usa prompt otimizado
   if (window._chatgptActive && msg.startsWith('[CHATGPT]')) {
     window._chatgptActive = false;
@@ -402,11 +406,15 @@ async function aiChat(msg) {
     const sys = { role: 'system', content: window._chatgptSystem || 'Você é JARVIS. Responda em pt-BR. Seja direto e útil.' };
     const msgs = [sys, { role: 'user', content: userPrompt }];
     let reply = '';
-    if (c.AI_PROVIDER === 'ollama' && c.OLLAMA_ENABLED) reply = await callOllama(c.OLLAMA_URL, c.OLLAMA_MODEL, msgs);
-    else if (c.AI_PROVIDER === 'openrouter' && c.OPENROUTER_API_KEY) reply = await callAI('https://openrouter.ai/api/v1', c.OPENROUTER_API_KEY, c.OPENROUTER_MODEL, msgs);
-    else if (c.AI_PROVIDER === 'openai' && c.OPENAI_API_KEY) reply = await callAI(c.OPENAI_BASE_URL, c.OPENAI_API_KEY, c.OPENAI_MODEL, msgs);
-    else if (c.AI_PROVIDER === 'nvidia' && c.NVIDIA_API_KEY) reply = await callAI('https://integrate.api.nvidia.com/v1', c.NVIDIA_API_KEY, c.NVIDIA_MODEL, msgs);
-    else reply = localReply(userPrompt);
+    try {
+      if (c.AI_PROVIDER === 'ollama' && c.OLLAMA_ENABLED) reply = await callOllama(c.OLLAMA_URL, c.OLLAMA_MODEL, msgs);
+      else if (c.AI_PROVIDER === 'openrouter' && c.OPENROUTER_API_KEY) reply = await callAI('https://openrouter.ai/api/v1', c.OPENROUTER_API_KEY, c.OPENROUTER_MODEL, msgs);
+      else if (c.AI_PROVIDER === 'openai' && c.OPENAI_API_KEY) reply = await callAI(c.OPENAI_BASE_URL, c.OPENAI_API_KEY, c.OPENAI_MODEL, msgs);
+      else if (c.AI_PROVIDER === 'nvidia' && c.NVIDIA_API_KEY) reply = await callAI('https://integrate.api.nvidia.com/v1', c.NVIDIA_API_KEY, c.NVIDIA_MODEL, msgs);
+      else reply = safeLocal(userPrompt);
+    } catch (err) {
+      reply = safeLocal(userPrompt);
+    }
 
     const type = window._chatgptType || 'chat';
     if (type === 'image') return '🎨 Descrição para imagem gerada:\n\n' + reply + '\n\n✨ Cole esta descrição no ChatGPT ou DALL-E para gerar a imagem.';
@@ -418,11 +426,15 @@ async function aiChat(msg) {
   const mem = loadMemory().slice(-10).map(m => ({ role: m.role === 'preference' ? 'system' : m.role, content: m.text }));
   const sys = { role: 'system', content: 'Você é JARVIS. Responda em pt-BR. Seja direto, claro e curto (máx 3 frases). Nunca seja repetitivo.' };
   const msgs = [sys, ...mem, ...conversationContext.slice(-6), { role: 'user', content: msg }];
-  if (c.AI_PROVIDER === 'ollama' && c.OLLAMA_ENABLED) return callOllama(c.OLLAMA_URL, c.OLLAMA_MODEL, msgs);
-  if (c.AI_PROVIDER === 'openrouter' && c.OPENROUTER_API_KEY) return callAI('https://openrouter.ai/api/v1', c.OPENROUTER_API_KEY, c.OPENROUTER_MODEL, msgs);
-  if (c.AI_PROVIDER === 'openai' && c.OPENAI_API_KEY) return callAI(c.OPENAI_BASE_URL, c.OPENAI_API_KEY, c.OPENAI_MODEL, msgs);
-  if (c.AI_PROVIDER === 'nvidia' && c.NVIDIA_API_KEY) return callAI('https://integrate.api.nvidia.com/v1', c.NVIDIA_API_KEY, c.NVIDIA_MODEL, msgs);
-  return localReply(msg);
+  try {
+    if (c.AI_PROVIDER === 'ollama' && c.OLLAMA_ENABLED) return await callOllama(c.OLLAMA_URL, c.OLLAMA_MODEL, msgs);
+    if (c.AI_PROVIDER === 'openrouter' && c.OPENROUTER_API_KEY) return await callAI('https://openrouter.ai/api/v1', c.OPENROUTER_API_KEY, c.OPENROUTER_MODEL, msgs);
+    if (c.AI_PROVIDER === 'openai' && c.OPENAI_API_KEY) return await callAI(c.OPENAI_BASE_URL, c.OPENAI_API_KEY, c.OPENAI_MODEL, msgs);
+    if (c.AI_PROVIDER === 'nvidia' && c.NVIDIA_API_KEY) return await callAI('https://integrate.api.nvidia.com/v1', c.NVIDIA_API_KEY, c.NVIDIA_MODEL, msgs);
+    return localReply(msg);
+  } catch (err) {
+    return safeLocal(msg);
+  }
 }
 
 // 
