@@ -32,131 +32,8 @@ const DEFAULTS = {
   LOCAL_TOOLS_ENABLED: true, APPROVAL_POLICY: 'once',
   VOICE_LANG: 'pt-BR', VOICE_RATE: 1.0, VOICE_PITCH: 0.95, CONTINUOUS_VOICE: true
 };
-function loadConfig() {
-  config = storedConfig();
-  $('#cfg-provider').value = config.AI_PROVIDER || 'local';
-  $('#cfg-openai-model').value = config.OPENAI_MODEL || 'gpt-4o-mini';
-  $('#cfg-openrouter-model').value = config.OPENROUTER_MODEL || 'openai/gpt-4o-mini';
-  $('#cfg-codex').checked = Boolean(config.CODEX_ENABLED);
-  $('#cfg-hermes-enabled').checked = Boolean(config.HERMES_ENABLED);
-  $('#cfg-hermes-url').value = config.HERMES_URL || '';
-  $('#cfg-hermes-command').value = config.HERMES_COMMAND || '';
-  $('#cfg-openclaw-enabled').checked = Boolean(config.OPENCLAW_ENABLED);
-  $('#cfg-openclaw-url').value = config.OPENCLAW_URL || '';
-  $('#cfg-openclaw-command').value = config.OPENCLAW_COMMAND || '';
-  $('#cfg-mcp-enabled').checked = Boolean(config.MCP_ENABLED);
-  $('#cfg-mcp-url').value = config.MCP_URL || '';
-  $('#cfg-mcp-command').value = config.MCP_COMMAND || '';
-  $('#cfg-local-tools-enabled').checked = config.LOCAL_TOOLS_ENABLED !== false;
-  $('#cfg-local-tools-confirm').checked = Boolean(config.LOCAL_TOOLS_REQUIRE_CONFIRMATION);
-  $('#cfg-approval-policy').value = config.APPROVAL_POLICY || 'once';
-  $('#openai-set').textContent = (config.OPENAI_API_KEY_SET || config.OPENAI_API_KEY) ? 'definida' : 'não definida';
-  $('#openrouter-set').textContent = (config.OPENROUTER_API_KEY_SET || config.OPENROUTER_API_KEY) ? 'definida' : 'não definida';
-  return config;
-}
-
-async function saveConfig(payload = null) {
-  const data = payload || {
-    AI_PROVIDER: $('#cfg-provider').value,
-    OPENAI_API_KEY: $('#cfg-openai-key').value.trim(),
-    OPENAI_MODEL: $('#cfg-openai-model').value.trim(),
-    OPENROUTER_API_KEY: $('#cfg-openrouter-key').value.trim(),
-    OPENROUTER_MODEL: $('#cfg-openrouter-model').value.trim(),
-    CODEX_ENABLED: String($('#cfg-codex').checked),
-    HERMES_ENABLED: String($('#cfg-hermes-enabled').checked),
-    HERMES_URL: $('#cfg-hermes-url').value.trim(),
-    HERMES_COMMAND: $('#cfg-hermes-command').value.trim(),
-    OPENCLAW_ENABLED: String($('#cfg-openclaw-enabled').checked),
-    OPENCLAW_URL: $('#cfg-openclaw-url').value.trim(),
-    OPENCLAW_COMMAND: $('#cfg-openclaw-command').value.trim(),
-    MCP_ENABLED: String($('#cfg-mcp-enabled').checked),
-    MCP_URL: $('#cfg-mcp-url').value.trim(),
-    MCP_COMMAND: $('#cfg-mcp-command').value.trim(),
-    LOCAL_TOOLS_ENABLED: String($('#cfg-local-tools-enabled').checked),
-    LOCAL_TOOLS_REQUIRE_CONFIRMATION: String($('#cfg-local-tools-confirm').checked),
-    APPROVAL_POLICY: $('#cfg-approval-policy').value
-  };
-  const merged = { ...storedConfig(), ...data };
-  let remoteOk = false;
-  if (backendAvailable !== false && payload === null) {
-    const res = await apiJson('/api/config', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(data)
-    }, { ok: false });
-    remoteOk = Boolean(res?.ok);
-  }
-  Store.set('config', merged);
-  config = merged;
-  $('#cfg-openai-key').value = '';
-  $('#cfg-openrouter-key').value = '';
-  $('#configResult').textContent = backendAvailable === false
-    ? 'Configuração salva neste navegador. O GitHub Pages roda em modo local.'
-    : (remoteOk || payload ? 'Configuração salva localmente.' : 'Falha ao salvar configuração.');
-  loadConfig();
-  await refresh();
-}
-
-const STATIC_SITE = /github\.io$/i.test(location.hostname);
-let backendAvailable = STATIC_SITE ? false : null;
-
-function storedConfig() {
-  return { ...DEFAULTS, ...Store.get('config', {}) };
-}
-
-function fallbackStatus() {
-  const cfg = storedConfig();
-  return {
-    ai: cfg.AI_PROVIDER || 'local',
-    memory: { freeGb: '--', totalGb: '--' },
-    uptimeSec: 0,
-    node: 'GitHub Pages',
-    runtime: {
-      node: { version: 'GitHub Pages' },
-      python: { available: false },
-      npm: { available: false }
-    },
-    codex: { available: false, enabled: false },
-    openai: Boolean(cfg.OPENAI_API_KEY),
-    openrouter: Boolean(cfg.OPENROUTER_API_KEY),
-    agents: [],
-    orchestrator: {
-      hermes: { enabled: false },
-      openclaw: { enabled: false },
-      mcp: { enabled: false, configs: [] }
-    },
-    localTools: { enabled: true, pythonBridge: false },
-    approvals: { policy: cfg.APPROVAL_POLICY || 'once', trusted: [], pending: [] }
-  };
-}
-
-async function apiJson(path, init = {}, fallback = null) {
-  try {
-    const r = await fetch(path, init);
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    backendAvailable = true;
-    return await r.json();
-  } catch (e) {
-    if (path.startsWith('/api/')) backendAvailable = false;
-    return typeof fallback === 'function' ? fallback(e) : fallback;
-  }
-}
-
-function loadLocalNotes() { return Store.get('notes', []); }
-function saveLocalNotes(notes) { Store.set('notes', notes.slice(-200)); }
-function loadLocalReminders() { return Store.get('local-reminders', []); }
-function saveLocalReminders(reminders) { Store.set('local-reminders', reminders.slice(-200)); }
-function addLocalReminder(text, when) {
-  const list = loadLocalReminders();
-  const item = { id: Date.now().toString(36), text, when: when || null, done: false, created: new Date().toISOString() };
-  list.push(item);
-  saveLocalReminders(list);
-  return item;
-}
-function dueLocalReminders() {
-  const now = Date.now();
-  return loadLocalReminders().filter(r => !r.done && r.when && new Date(r.when).getTime() <= now);
-}
+function loadConfig() { return { ...DEFAULTS, ...Store.get('config', {}) }; }
+function saveConfig(p) { const c = loadConfig(); Object.assign(c, p); Store.set('config', c); return c; }
 
 // ── MEMORY ──
 function loadMemory() { return Store.get('memory', []); }
@@ -527,23 +404,21 @@ function localReply(cmd) {
 
   // -- RESPOSTAS A PERGUNTAS DO JARVIS --
   if (lastQuestion) {
-    const pendingQuestion = lastQuestion;
+    const answer = text;
     lastQuestion = null;
-    if (pendingQuestion === 'name') {
+    if (lastQuestion === 'name') {
       userName = cmd.trim().split(' ')[0];
       localStorage.setItem('jarvis-username', userName);
       conversationContext.push({ role: 'user', content: cmd });
       return 'Prazer, ' + userName + '! Como posso ajudar?';
     }
-    if (pendingQuestion === 'search') {
+    if (lastQuestion === 'search') {
       window.open('https://www.google.com/search?q=' + encodeURIComponent(cmd), '_blank');
       conversationContext.push({ role: 'user', content: cmd });
       return 'Pesquisando "' + cmd + '".';
     }
-    if (pendingQuestion === 'open_app') {
-      const opened = tryOpenApp(cmd);
-      if (opened) return opened;
-      return 'Não reconheci "' + cmd + '". Quer que eu pesquise como abrir esse programa?';
+    if (lastQuestion === 'open_app') {
+      return tryOpenApp(cmd);
     }
     conversationContext.push({ role: 'user', content: cmd });
     return 'Entendido: "' + cmd + '". Mais alguma coisa?';
