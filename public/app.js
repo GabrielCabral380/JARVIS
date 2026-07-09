@@ -1,293 +1,39 @@
+// 
+// JARVIS — Client-Side Full Implementation v3.0
+// Funciona 100% no GitHub Pages sem backend
+// Diálogo natural, autonomia, interação com PC
+// 
 
-const $ = (s) => document.querySelector(s);
-const app = $('#app');
-let status = {};
-let config = {};
-let voiceActive = false;
-let recognitionStarting = false;
-let approvalState = { policy: 'once', trusted: [], pending: [] };
+const $ = s => document.querySelector(s);
+const APP = document.getElementById('app');
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-let recognition = SpeechRecognition ? new SpeechRecognition() : null;
-if (recognition) {
-  recognition.lang = 'pt-BR';
-  recognition.continuous = true;
-  recognition.interimResults = false;
-}
+let recognition = null;
+let listening = false;
+let safeMode = false;
+let conversationContext = []; // contexto da conversa atual
+let lastQuestion = null; // última pergunta feita pelo JARVIS
+// ── STORAGE (primeiro para evitar erro de inicialização) ──
+const Store = {
+  get(k, d) { try { return JSON.parse(localStorage.getItem('jarvis-' + k)) ?? d; } catch { return d; } },
+  set(k, v) { localStorage.setItem('jarvis-' + k, JSON.stringify(v)); },
+  del(k) { localStorage.removeItem('jarvis-' + k); }
+};
 
-app.innerHTML = `
-<header class="topbar">
-  <div class="brand">J·A·R·V·I·S</div>
-  <nav>
-    <button class="tab active" data-tab="cockpit">Cockpit</button>
-    <button class="tab" data-tab="terminal">Terminal</button>
-    <button class="tab" data-tab="files">Arquivos</button>
-    <button class="tab" data-tab="config">Config</button>
-  </nav>
-  <div class="clock" id="clock">00:00:00</div>
-</header>
-
-<section class="layout">
-  <aside class="panel left">
-    <h3>◉ SYSTEMS</h3>
-    <div id="status"></div>
-    <div class="mini-grid">
-      <div><b id="cpu">--%</b><span>CPU</span></div>
-      <div><b id="ram">-- GB</b><span>RAM livre</span></div>
-      <div><b id="uptime">--:--</b><span>SYS UPTIME</span></div>
-      <div><b id="voice">OFF</b><span>VOZ</span></div>
-    </div>
-    <h3>◉ AI MODELS</h3>
-    <ul class="model-list">
-      <li id="model-openai">OpenAI</li>
-      <li id="model-openrouter">OpenRouter</li>
-      <li id="model-codex">Codex CLI</li>
-      <li>Browser voice</li>
-    </ul>
-    <h3>◉ AIOX-CORE</h3>
-    <div id="agents"></div>
-  </aside>
-
-  <main class="center">
-    <section class="screen tabpage active" id="tab-cockpit">
-      <div class="orb-wrap">
-        <div class="orb"><div class="face"><h1 id="mood">◎</h1><p id="mode">IDLE</p></div></div>
-      </div>
-      <div class="quick">
-        <button id="diagnose">Diagnosticar sistema</button>
-        <button id="mic">🎙️ Falar</button>
-        <button id="stopVoice">Parar voz</button>
-      </div>
-      <div class="chatbox" id="messages"></div>
-      <div class="composer">
-        <input id="input" placeholder="Fale ou digite: Jarvis, explique o que está rodando..."/>
-        <button id="send">Enviar</button>
-      </div>
-    </section>
-
-    <section class="screen tabpage" id="tab-terminal">
-      <h2>JARVIS · TERMINAL</h2>
-      <div id="logs" class="log">[BOOT] [system] JARVIS inicializado. Pronto para uso.</div>
-    </section>
-
-    <section class="screen tabpage" id="tab-files">
-      <h2>Documents & Projects</h2>
-      <p class="muted">Notas rápidas e memória local ficam em <code>system/JARVIS-MEMORY.md</code>.</p>
-      <input id="note" placeholder="anotar preferência, ideia ou tarefa"/>
-      <button id="saveNote">Salvar nota</button>
-      <div class="note-help">O Obsidian pode usar a pasta <code>obsidian-template</code> como base.</div>
-    </section>
-
-    <section class="screen tabpage" id="tab-config">
-      <h2>Configuration</h2>
-      <p class="muted">Adicione sua API sem editar arquivo manualmente. As chaves não aparecem no painel depois de salvas.</p>
-      <label>Provider</label>
-      <select id="cfg-provider">
-        <option value="local">Local / fallback</option>
-        <option value="openai">OpenAI</option>
-        <option value="openrouter">OpenRouter</option>
-      </select>
-      <label>OpenAI API Key <span id="openai-set" class="pill">não definida</span></label>
-      <input id="cfg-openai-key" type="password" placeholder="cole sua chave OpenAI ou deixe vazio"/>
-      <label>OpenAI Model</label>
-      <input id="cfg-openai-model" placeholder="gpt-4o-mini"/>
-      <label>OpenRouter API Key <span id="openrouter-set" class="pill">não definida</span></label>
-      <input id="cfg-openrouter-key" type="password" placeholder="cole sua chave OpenRouter ou deixe vazio"/>
-      <label>OpenRouter Model</label>
-      <input id="cfg-openrouter-model" placeholder="openai/gpt-4o-mini"/>
-      <label class="check"><input id="cfg-codex" type="checkbox"/> Habilitar Codex CLI para tarefas de código</label>
-      <h3>Orquestrador local</h3>
-      <p class="muted">Configure URL local ou comando CLI se Hermes/OpenClaw/MCP já estiverem instalados. URLs externas são bloqueadas por segurança.</p>
-      <label class="check"><input id="cfg-hermes-enabled" type="checkbox"/> Hermes ativo</label>
-      <input id="cfg-hermes-url" placeholder="Hermes URL local, ex: http://localhost:8001"/>
-      <input id="cfg-hermes-command" placeholder="Hermes comando CLI opcional, ex: hermes task"/>
-      <label class="check"><input id="cfg-openclaw-enabled" type="checkbox"/> OpenClaw ativo</label>
-      <input id="cfg-openclaw-url" placeholder="OpenClaw URL local, ex: http://localhost:8675"/>
-      <input id="cfg-openclaw-command" placeholder="OpenClaw comando CLI opcional"/>
-      <label class="check"><input id="cfg-mcp-enabled" type="checkbox"/> MCP ativo</label>
-      <input id="cfg-mcp-url" placeholder="MCP HTTP local, ex: http://localhost:3001/mcp"/>
-      <input id="cfg-mcp-command" placeholder="MCP comando stdio opcional para referência"/>
-      <h3>Ferramentas locais offline</h3>
-      <label class="check"><input id="cfg-local-tools-enabled" type="checkbox"/> Ativar ferramentas locais sem IA</label>
-      <label class="check"><input id="cfg-local-tools-confirm" type="checkbox"/> Exigir confirmação manual para ferramentas locais</label>
-      <label>Política de aprovação</label>
-      <select id="cfg-approval-policy">
-        <option value="once">Aprovar só na primeira execução</option>
-        <option value="always">Aprovar sempre</option>
-        <option value="off">Não exigir aprovação</option>
-      </select>
-      <button id="saveConfig">Salvar Configuração</button>
-      <button id="testApi">Testar API agora</button>
-      <div id="configResult" class="muted"></div>
-    </section>
-  </main>
-
-  <aside class="panel right">
-    <h3>▸ METRICS</h3>
-    <div class="metric"><span>TASKS</span><b id="tasks">0</b></div>
-    <div class="metric"><span>PROVIDER</span><b id="provider">local</b></div>
-    <div class="metric"><span>CODEX</span><b id="codexState">idle</b></div>
-    <h3>▸ ORCHESTRATOR</h3>
-    <div id="orchestrator" class="orchestrator">Carregando...</div>
-    <input id="orchCommand" placeholder="comando para Hermes/OpenClaw"/>
-    <div class="quick vertical">
-      <button id="sendHermes">Enviar Hermes</button>
-      <button id="sendOpenClaw">Enviar OpenClaw</button>
-      <button id="refreshOrch">Detectar MCP/Hermes/OpenClaw</button>
-    </div>
-    <h3>▸ LOCAL TOOLS</h3>
-    <div id="localRuntime" class="orchestrator">Carregando runtime...</div>
-    <div id="approvalBox" class="orchestrator">Aprovações: carregando...</div>
-    <div class="voice-hint">
-      Voz ativa aceita: “Jarvis, abra a calculadora”, “pesquise IA na internet”,
-      “liste meus lembretes”, “envie para Hermes: ...”, “detecte MCP Hermes OpenClaw”.
-    </div>
-    <input id="localQuery" placeholder="pesquisar na internet..."/>
-    <div class="quick vertical">
-      <button id="openBrowser">Abrir navegador</button>
-      <button id="searchWeb">Pesquisar internet</button>
-      <button id="openCalc">Abrir calculadora</button>
-      <button id="openNotepad">Abrir bloco de notas</button>
-      <button id="listReminders">Lembretes ativos</button>
-    </div>
-    <h3>▸ MARK-XLVI TOOLS</h3>
-    <div class="quick vertical">
-      <button id="toolSearch">🔍 Web Search</button>
-      <button id="toolWeather">🌤️ Clima</button>
-      <button id="toolFlight">✈️ Voos</button>
-      <button id="toolCode">💻 Code Helper</button>
-      <button id="toolGames">🎮 Games</button>
-      <button id="toolAgent">🤖 Agent</button>
-      <button id="toolReminder">⏰ Lembrete</button>
-    </div>
-    <div id="toolResult" class="log" style="font-size:0.75rem;margin-top:8px;max-height:120px;overflow:auto;"></div>
-    <h3>▸ QUICK</h3>
-    <div class="quick vertical">
-      <button data-goto="cockpit">Cockpit</button>
-      <button data-goto="terminal">Terminal</button>
-      <button data-goto="files">Projetos</button>
-      <button data-goto="config">Config</button>
-    </div>
-    <h3>Notas rápidas</h3>
-    <p class="muted">A interface mantém o estilo cockpit/terminal do repositório, com API configurável e núcleo local leve.</p>
-  </aside>
-</section>
-`;
-
-function add(role, text) {
-  const d = document.createElement('div');
-  d.className = `msg ${role}`;
-  d.textContent = text;
-  $('#messages').appendChild(d);
-  $('#messages').scrollTop = $('#messages').scrollHeight;
-}
-
-function setMode(mode, mood = '◉') {
-  $('#mode').textContent = mode;
-  $('#mood').textContent = mood;
-}
-
-function speak(text) {
-  if (!('speechSynthesis' in window)) return;
-  window.speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = navigator.language?.startsWith('pt') ? 'pt-BR' : 'en-US';
-  u.rate = 1.02;
-  u.pitch = .92;
-  u.volume = 1;
-  u.onstart = () => setMode('SPEAKING', '◉');
-  u.onend = () => setMode('IDLE', '◎');
-  window.speechSynthesis.speak(u);
-}
-
-function formatUptime(sec = 0) {
-  const m = Math.floor(sec / 60);
-  const h = Math.floor(m / 60);
-  return `${String(h).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-}
-
-async function refresh() {
-  status = await fetch('/api/status').then(r => r.json());
-  $('#status').innerHTML = Object.entries({
-    SERVER: 'OK',
-    API: status.ai,
-    NODE: status.runtime?.node?.version || status.node,
-    PYTHON: status.runtime?.python?.available ? 'OK' : 'AUSENTE',
-    VOZ: 'OK',
-    CODEX: status.codex?.available ? (status.codex.enabled ? 'ATIVO' : 'INSTALADO') : 'OPCIONAL'
-  }).map(([k, v]) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`).join('');
-  $('#ram').textContent = `${status.memory.freeGb}/${status.memory.totalGb}`;
-  $('#uptime').textContent = formatUptime(status.uptimeSec);
-  $('#voice').textContent = recognition ? 'ON' : 'TEXT';
-  $('#provider').textContent = status.ai;
-  $('#codexState').textContent = status.codex?.enabled ? 'ativo' : (status.codex?.available ? 'off' : 'opcional');
-  $('#model-openai').className = status.openai ? 'ok' : '';
-  $('#model-openrouter').className = status.openrouter ? 'ok' : '';
-  $('#model-codex').className = status.codex?.available ? 'ok' : '';
-  $('#agents').innerHTML = status.agents.map(a => `<p><span class="badge">${a.name}</span> <span class="small">${a.risk}</span></p>`).join('');
-  renderOrchestrator(status.orchestrator || {});
-  renderLocalRuntime(status.runtime || {}, status.localTools || {});
-  renderApprovals(status.approvals || {});
-}
-
-function renderOrchestrator(orch = {}) {
-  const h = orch.hermes || {};
-  const o = orch.openclaw || {};
-  const m = orch.mcp || {};
-  const mcpTools = (m.tools || []).map(t => t.name).slice(0, 5).join(', ');
-  $('#orchestrator').innerHTML = `
-    <div class="kv"><span>Hermes</span><b>${h.enabled ? (h.http?.ok ? 'HTTP OK' : h.cliAvailable ? 'CLI OK' : h.commandConfigured ? 'CMD' : 'OFF') : 'OFF'}</b></div>
-    <div class="kv"><span>OpenClaw</span><b>${o.enabled ? (o.http?.ok ? 'HTTP OK' : o.cliAvailable ? 'CLI OK' : o.commandConfigured ? 'CMD' : 'OFF') : 'OFF'}</b></div>
-    <div class="kv"><span>MCP</span><b>${m.enabled ? (m.http?.ok ? 'HTTP OK' : (m.configs?.length ? 'CONFIG' : 'OFF')) : 'OFF'}</b></div>
-    <p class="small">${mcpTools ? 'Tools: ' + mcpTools : (m.configs?.length ? 'Configs MCP detectadas: ' + m.configs.length : 'Nenhum MCP conectado.')}</p>
-  `;
-}
-
-function renderLocalRuntime(runtime = {}, localTools = {}) {
-  const py = runtime.python || {};
-  const npm = runtime.npm || {};
-  $('#localRuntime').innerHTML = `
-    <div class="kv"><span>Node</span><b>${runtime.node?.version || 'OK'}</b></div>
-    <div class="kv"><span>Python</span><b>${py.available ? (py.version || 'OK') : 'AUSENTE'}</b></div>
-    <div class="kv"><span>npm</span><b>${npm.available ? (npm.version || 'OK') : 'OPCIONAL'}</b></div>
-    <div class="kv"><span>Local Skills</span><b>${localTools.enabled ? 'ON' : 'OFF'}</b></div>
-    <p class="small">${localTools.pythonBridge ? 'Ponte Python ativa para automações locais.' : 'Sem Python: usando fallback Node para ações simples.'}</p>
-  `;
-}
-
-function renderApprovals(approvals = {}) {
-  approvalState = { policy: approvals.policy || 'once', trusted: approvals.trusted || [], pending: approvals.pending || [] };
-  const pending = approvalState.pending || [];
-  $('#approvalBox').innerHTML = `
-    <div class="kv"><span>Política</span><b>${approvalState.policy}</b></div>
-    <div class="kv"><span>Confiadas</span><b>${approvalState.trusted.length}</b></div>
-    <div class="kv"><span>Pendentes</span><b>${pending.length}</b></div>
-    ${pending.length ? pending.slice(0, 3).map(item => `<div class="small">• ${item.label}</div>`).join('') : '<div class="small">Nenhuma aprovação pendente.</div>'}
-  `;
-}
-
-async function approvePending(token, execute = true) {
-  const r = await fetch('/api/approvals/approve', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ token, execute })
-  }).then(x => x.json()).catch(e => ({ ok: false, text: e.message }));
-  await refresh();
-  return r;
-}
-
-async function handleApprovalResult(result) {
-  if (!result?.requiresApproval || !result.approval?.token) return result;
-  const go = window.confirm(`${result.text}\n\nDeseja aprovar agora?\nDepois disso, esta ação fica liberada conforme a política atual.`);
-  if (!go) return result;
-  const approved = await approvePending(result.approval.token, true);
-  const msg = approved.text || (approved.ok ? 'Ação aprovada e executada.' : 'Aprovação falhou.');
-  add('assistant', msg);
-  speak(msg);
-  return approved;
-}
-
-async function loadConfig() {
-  config = await fetch('/api/config').then(r => r.json());
+// ── CONFIG ──
+const DEFAULTS = {
+  AI_PROVIDER: 'local', OPENAI_API_KEY: '', OPENAI_MODEL: 'gpt-4o-mini', OPENAI_BASE_URL: 'https://api.openai.com/v1',
+  OPENROUTER_API_KEY: '', OPENROUTER_MODEL: 'openai/gpt-4o-mini', OPENROUTER_SITE_URL: 'https://gabrielcabral380.github.io/JARVIS/', OPENROUTER_SITE_NAME: 'JARVIS Cloud',
+  NVIDIA_API_KEY: '', NVIDIA_MODEL: 'meta/llama-3.1-70b-instruct',
+  // Ollama — IA local, sem API key necessária
+  OLLAMA_ENABLED: true, OLLAMA_URL: 'http://localhost:11434', OLLAMA_MODEL: 'llama3',
+  CODEX_ENABLED: false, HERMES_ENABLED: true, HERMES_URL: 'http://localhost:8001',
+  OPENCLAW_ENABLED: true, OPENCLAW_URL: 'http://localhost:8675',
+  MCP_ENABLED: true, MCP_URL: 'http://localhost:3001/mcp',
+  LOCAL_TOOLS_ENABLED: true, APPROVAL_POLICY: 'once',
+  VOICE_LANG: 'pt-BR', VOICE_RATE: 1.0, VOICE_PITCH: 0.95, CONTINUOUS_VOICE: true
+};
+function loadConfig() {
+  config = storedConfig();
   $('#cfg-provider').value = config.AI_PROVIDER || 'local';
   $('#cfg-openai-model').value = config.OPENAI_MODEL || 'gpt-4o-mini';
   $('#cfg-openrouter-model').value = config.OPENROUTER_MODEL || 'openai/gpt-4o-mini';
@@ -304,12 +50,13 @@ async function loadConfig() {
   $('#cfg-local-tools-enabled').checked = config.LOCAL_TOOLS_ENABLED !== false;
   $('#cfg-local-tools-confirm').checked = Boolean(config.LOCAL_TOOLS_REQUIRE_CONFIRMATION);
   $('#cfg-approval-policy').value = config.APPROVAL_POLICY || 'once';
-  $('#openai-set').textContent = config.OPENAI_API_KEY_SET ? 'definida' : 'não definida';
-  $('#openrouter-set').textContent = config.OPENROUTER_API_KEY_SET ? 'definida' : 'não definida';
+  $('#openai-set').textContent = (config.OPENAI_API_KEY_SET || config.OPENAI_API_KEY) ? 'definida' : 'não definida';
+  $('#openrouter-set').textContent = (config.OPENROUTER_API_KEY_SET || config.OPENROUTER_API_KEY) ? 'definida' : 'não definida';
+  return config;
 }
 
-async function saveConfig() {
-  const payload = {
+async function saveConfig(payload = null) {
+  const data = payload || {
     AI_PROVIDER: $('#cfg-provider').value,
     OPENAI_API_KEY: $('#cfg-openai-key').value.trim(),
     OPENAI_MODEL: $('#cfg-openai-model').value.trim(),
@@ -329,350 +76,1135 @@ async function saveConfig() {
     LOCAL_TOOLS_REQUIRE_CONFIRMATION: String($('#cfg-local-tools-confirm').checked),
     APPROVAL_POLICY: $('#cfg-approval-policy').value
   };
-  const res = await fetch('/api/config', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(payload)
-  }).then(r => r.json());
-  $('#cfg-openai-key').value = '';
-  $('#cfg-openrouter-key').value = '';
-  $('#configResult').textContent = res.ok ? 'Configuração salva. O provedor já será usado nas próximas mensagens.' : 'Falha ao salvar configuração.';
-  await loadConfig();
-  await refresh();
-}
-
-
-function normalizeSpokenCommand(text = '') {
-  return String(text || '')
-    .trim()
-    .replace(/^[\s,.;:!?]*(jarvis|j[aá]rvis|astra|assistente)\b[\s,.;:!?]*/i, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-async function handleVoiceTranscript(text) {
-  const raw = String(text || '').trim();
-  const cmd = normalizeSpokenCommand(raw);
-  const lower = cmd.toLowerCase();
-
-  if (/^(parar voz|pare a voz|desligar microfone|desative o microfone|sil[êe]ncio)$/.test(lower)) {
-    voiceActive = false;
-    try { recognition?.stop(); } catch {}
-    setMode('IDLE', '◎');
-    add('assistant', 'Voz contínua pausada.');
-    return;
-  }
-
-  if (/^(diagnosticar sistema|diagnostique o sistema|verificar sistema)$/.test(lower)) {
-    $('#diagnose').click();
-    return;
-  }
-
-  if (/^(detectar|diagnosticar|verificar).*(mcp|hermes|openclaw|open claw)/.test(lower)) {
-    await send('Jarvis, detecte MCP Hermes OpenClaw');
-    return;
-  }
-
-  await send(raw);
-}
-
-async function send(text) {
-  text = (text || $('#input').value).trim();
-  if (!text) return;
-  $('#input').value = '';
-  add('user', text);
-  setMode('THINKING', '◌');
-  const res = await fetch('/api/chat', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ message: text })
-  }).then(r => r.json());
-  if (res?.requiresApproval) {
-    add('assistant', res.text || 'Aprovação necessária.');
-    await handleApprovalResult(res);
-    return;
-  }
-  const reply = res.text || res.error || 'Sem resposta.';
-  add('assistant', reply);
-  setMode(res.state || 'IDLE', res.emotion === 'focused' ? '◈' : '◉');
-  speak(reply);
-}
-
-function activateTab(name) {
-  document.querySelectorAll('.tabpage').forEach(el => el.classList.toggle('active', el.id === `tab-${name}`));
-  document.querySelectorAll('.tab').forEach(el => el.classList.toggle('active', el.dataset.tab === name));
-}
-
-
-async function runLocalTool(payload) {
-  setMode('EXECUTING', '◈');
-  const r = await fetch('/api/local-tools', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(payload)
-  }).then(x => x.json()).catch(e => ({ ok: false, text: e.message }));
-  if (r?.requiresApproval) {
-    add('assistant', r.text || 'Aprovação necessária.');
-    await handleApprovalResult(r);
-    return r;
-  }
-  const msg = r.text || (r.ok ? 'Ação local executada.' : 'Ação local falhou.');
-  add('assistant', msg);
-  speak(msg);
-  await refresh();
-  return r;
-}
-
-async function checkDueReminders() {
-  const r = await fetch('/api/local-tools/reminders/due').then(x => x.json()).catch(() => ({ due: [] }));
-  for (const item of (r.due || [])) {
-    const msg = `Lembrete: ${item.text}`;
-    add('assistant', msg);
-    speak(msg);
-  }
-}
-
-document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => activateTab(b.dataset.tab));
-document.querySelectorAll('[data-goto]').forEach(b => b.onclick = () => activateTab(b.dataset.goto));
-$('#send').onclick = () => send();
-$('#input').addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
-$('#diagnose').onclick = () => send('JARVIS, diagnostique o sistema e diga o que está rodando.');
-$('#stopVoice').onclick = () => {
-  voiceActive = false;
-  window.speechSynthesis?.cancel();
-  try { recognition?.stop(); } catch {}
-  $('#voice').textContent = recognition ? 'ON' : 'TEXT';
-  setMode('IDLE', '◎');
-};
-$('#saveConfig').onclick = saveConfig;
-$('#testApi').onclick = async () => {
-  $('#configResult').textContent = 'Testando API...';
-  const r = await fetch('/api/test-provider').then(x => x.json());
-  $('#configResult').textContent = r.ok
-    ? `API reconhecida: ${r.provider}. Resposta: ${r.reply}`
-    : `API não funcionou: ${r.provider || 'local'} - ${r.error || 'erro desconhecido'}`;
-  await refresh();
-};
-$('#saveNote').onclick = async () => {
-  const note = $('#note').value.trim();
-  if (!note) return;
-  await fetch('/api/note', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ note }) });
-  $('#note').value = '';
-  add('assistant', 'Nota salva na memória local.');
-};
-function startContinuousVoice() {
-  if (!recognition || recognitionStarting) return;
-  recognitionStarting = true;
-  window.speechSynthesis?.cancel();
-  setMode('LISTENING', '◍');
-  $('#voice').textContent = 'LIVE';
-  try { recognition.start(); } catch {}
-  setTimeout(() => { recognitionStarting = false; }, 600);
-}
-
-
-async function sendOrchestrator(target) {
-  const command = $('#orchCommand').value.trim();
-  if (!command) return add('assistant', 'Digite um comando para enviar ao orquestrador.');
-  add('user', `${target}: ${command}`);
-  setMode('EXECUTING', '◈');
-  const r = await fetch('/api/orchestrator/command', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ target, command })
-  }).then(x => x.json()).catch(e => ({ ok: false, text: e.message }));
-  if (r?.requiresApproval) {
-    add('assistant', r.text || 'Aprovação necessária.');
-    await handleApprovalResult(r);
-    return;
-  }
-  const msg = r.ok ? `Comando enviado para ${target}: ${r.text || 'aceito.'}` : `Falha ao enviar para ${target}: ${r.text || 'sem detalhes'}`;
-  add('assistant', msg);
-  speak(msg);
-  await refresh();
-}
-
-$('#sendHermes').onclick = () => sendOrchestrator('hermes');
-$('#sendOpenClaw').onclick = () => sendOrchestrator('openclaw');
-$('#refreshOrch').onclick = async () => { await refresh(); add('assistant', 'Detecção de Hermes, OpenClaw e MCP atualizada.'); };
-$('#openBrowser').onclick = () => runLocalTool({ action: 'open_browser', browser: 'default' });
-$('#searchWeb').onclick = () => {
-  const query = $('#localQuery').value.trim() || $('#input').value.trim();
-  if (!query) return add('assistant', 'Digite uma pesquisa primeiro.');
-  runLocalTool({ action: 'search_web', query });
-};
-$('#openCalc').onclick = () => runLocalTool({ action: 'open_app', app: 'calculator' });
-$('#openNotepad').onclick = () => runLocalTool({ action: 'open_app', app: 'notepad' });
-$('#listReminders').onclick = () => send('listar lembretes');
-
-$('#mic').onclick = () => {
-  if (!recognition) {
-    add('assistant', 'Reconhecimento de voz não disponível neste navegador. Use Chrome ou Edge.');
-    return;
-  }
-  voiceActive = true;
-  add('assistant', 'Microfone contínuo ativo. Fale normalmente; clique em Parar voz para encerrar.');
-  startContinuousVoice();
-};
-if (recognition) {
-  recognition.onresult = e => {
-    const last = e.results[e.results.length - 1];
-    if (last?.isFinal) handleVoiceTranscript(last[0].transcript);
-  };
-  recognition.onerror = e => {
-    if (voiceActive && !['aborted', 'no-speech'].includes(e.error)) add('assistant', 'Microfone: ' + e.error);
-  };
-  recognition.onend = () => {
-    recognitionStarting = false;
-    if (voiceActive) setTimeout(startContinuousVoice, 450);
-    else setMode('IDLE', '◎');
-  };
-}
-
-const events = new EventSource('/api/events');
-events.onmessage = ev => {
-  try {
-    const data = JSON.parse(ev.data);
-    if (data.type === 'event') {
-      $('#logs').textContent = `[${data.ts?.slice(11, 19)}] ${data.event}\n` + $('#logs').textContent.slice(0, 3000);
-    }
-  } catch {}
-};
-events.onerror = () => {
-  $('#logs').textContent = `[local] aguardando eventos...\n` + $('#logs').textContent.slice(0, 3000);
-};
-
-// ============================================================
-// MARK-XLVI TOOLS — Frontend handlers
-// ============================================================
-function toolResult(text) {
-  const el = $('#toolResult');
-  el.textContent = text;
-  el.scrollTop = 0;
-}
-
-async function callAgentTool(action, parameters = {}) {
-  try {
-    const r = await fetch('/api/agent', {
+  const merged = { ...storedConfig(), ...data };
+  let remoteOk = false;
+  if (backendAvailable !== false && payload === null) {
+    const res = await apiJson('/api/config', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ action, parameters })
-    }).then(x => x.json());
-    return r;
+      body: JSON.stringify(data)
+    }, { ok: false });
+    remoteOk = Boolean(res?.ok);
+  }
+  Store.set('config', merged);
+  config = merged;
+  $('#cfg-openai-key').value = '';
+  $('#cfg-openrouter-key').value = '';
+  $('#configResult').textContent = backendAvailable === false
+    ? 'Configuração salva neste navegador. O GitHub Pages roda em modo local.'
+    : (remoteOk || payload ? 'Configuração salva localmente.' : 'Falha ao salvar configuração.');
+  loadConfig();
+  await refresh();
+}
+
+const STATIC_SITE = /github\.io$/i.test(location.hostname);
+let backendAvailable = STATIC_SITE ? false : null;
+
+function storedConfig() {
+  return { ...DEFAULTS, ...Store.get('config', {}) };
+}
+
+function fallbackStatus() {
+  const cfg = storedConfig();
+  return {
+    ai: cfg.AI_PROVIDER || 'local',
+    memory: { freeGb: '--', totalGb: '--' },
+    uptimeSec: 0,
+    node: 'GitHub Pages',
+    runtime: {
+      node: { version: 'GitHub Pages' },
+      python: { available: false },
+      npm: { available: false }
+    },
+    codex: { available: false, enabled: false },
+    openai: Boolean(cfg.OPENAI_API_KEY),
+    openrouter: Boolean(cfg.OPENROUTER_API_KEY),
+    agents: [],
+    orchestrator: {
+      hermes: { enabled: false },
+      openclaw: { enabled: false },
+      mcp: { enabled: false, configs: [] }
+    },
+    localTools: { enabled: true, pythonBridge: false },
+    approvals: { policy: cfg.APPROVAL_POLICY || 'once', trusted: [], pending: [] }
+  };
+}
+
+async function apiJson(path, init = {}, fallback = null) {
+  try {
+    const r = await fetch(path, init);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    backendAvailable = true;
+    return await r.json();
   } catch (e) {
-    return { ok: false, error: e.message };
+    if (path.startsWith('/api/')) backendAvailable = false;
+    return typeof fallback === 'function' ? fallback(e) : fallback;
   }
 }
 
-function promptTool(msg, placeholder) {
-  const val = window.prompt(msg, placeholder);
-  return val;
+function loadLocalNotes() { return Store.get('notes', []); }
+function saveLocalNotes(notes) { Store.set('notes', notes.slice(-200)); }
+function loadLocalReminders() { return Store.get('local-reminders', []); }
+function saveLocalReminders(reminders) { Store.set('local-reminders', reminders.slice(-200)); }
+function addLocalReminder(text, when) {
+  const list = loadLocalReminders();
+  const item = { id: Date.now().toString(36), text, when: when || null, done: false, created: new Date().toISOString() };
+  list.push(item);
+  saveLocalReminders(list);
+  return item;
+}
+function dueLocalReminders() {
+  const now = Date.now();
+  return loadLocalReminders().filter(r => !r.done && r.when && new Date(r.when).getTime() <= now);
 }
 
-$('#toolSearch').onclick = async () => {
-  const query = promptTool('Pesquisar na web:', 'pesquisa');
-  if (!query) return;
-  setMode('EXECUTING', '◈');
-  const r = await callAgentTool('web_search', { query });
-  if (r.ok && r.result) {
-    const output = r.result.output || JSON.stringify(r.result);
-    toolResult(output.substring(0, 500));
-    add('assistant', `Pesquisa: ${query} → ${output.substring(0, 200)}`);
-  } else {
-    toolResult('Erro: ' + (r.error || 'sem resposta'));
-  }
-  setMode('IDLE', '◎');
-};
+// ── MEMORY ──
+function loadMemory() { return Store.get('memory', []); }
+function saveMemory(m) { Store.set('memory', m.slice(-200)); }
+function appendMemory(role, text) { const m = loadMemory(); m.push({ role, text: String(text).slice(0, 1200), ts: new Date().toISOString() }); saveMemory(m); }
 
-$('#toolWeather').onclick = async () => {
-  const city = promptTool('Cidade:', 'São Paulo');
-  if (!city) return;
-  setMode('EXECUTING', '◈');
-  const r = await callAgentTool('weather_report', { city });
-  if (r.ok && r.result) {
-    toolResult(r.result.output || JSON.stringify(r.result));
-    add('assistant', `Clima: ${city}`);
-  } else {
-    toolResult('Erro: ' + (r.error || 'sem resposta'));
-  }
-  setMode('IDLE', '◎');
-};
+// ── REMINDERS ──
+function loadReminders() { return Store.get('reminders', []); }
+function saveReminders(r) { Store.set('reminders', r); }
+function addReminder(text, when) { const r = loadReminders(); r.push({ id: Date.now().toString(36), text, when: when || null, done: false, created: new Date().toISOString() }); saveReminders(r); return r[r.length - 1]; }
+function listReminders() { return loadReminders().filter(r => !r.done); }
+function dueReminders() { const n = Date.now(); return loadReminders().filter(r => !r.done && r.when && new Date(r.when).getTime() <= n); }
+function parseReminder(text) {
+  const t = text.toLowerCase();
+  const patterns = [/(?:me\s+)?lembre\s+(?:de\s+)?(.+?)(?:\s+em\s+(\d+)\s*(?:min|minutos?|h|horas?))?$/i, /(?:me\s+)?lembrar\s+(?:de\s+)?(.+?)(?:\s+em\s+(\d+)\s*(?:min|minutos?|h|horas?))?$/i, /(?:me\s+)?lembre\s+(?:de\s+)?(.+?)(?:\s+(?:amanh[ãa]|hoje)\s*(?:[àa]s\s+)?([0-9]{1,2}:[0-9]{2}))?$/i];
+  for (const p of patterns) { const m = text.match(p); if (m) { const rt = m[1].trim(); let w = null; if (m[2]) { if (m[2].includes(':')) { const [hh, mm] = m[2].split(':'); const d = new Date(); d.setHours(parseInt(hh), parseInt(mm), 0, 0); if (d < Date.now()) d.setDate(d.getDate() + 1); w = d.toISOString(); } else { const n = parseInt(m[2]); w = new Date(Date.now() + n * (t.includes('hora') ? 3600000 : 60000)).toISOString(); } } else if (t.includes('amanh')) { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); w = d.toISOString(); } return { text: rt, when: w }; } }
+  return null;
+}
 
-$('#toolFlight').onclick = async () => {
-  const origin = promptTool('Origem (IATA):', 'GRU');
-  const dest = promptTool('Destino (IATA):', 'JFK');
-  const date = promptTool('Data (YYYY-MM-DD):', '2025-12-01');
-  if (!origin || !dest) return;
-  setMode('EXECUTING', '◈');
-  const r = await callAgentTool('flight_finder', { origin, destination: dest, date });
-  if (r.ok && r.result) {
-    toolResult(r.result.output || JSON.stringify(r.result));
-    add('assistant', `Voo: ${origin}→${dest}`);
-  } else {
-    toolResult('Erro: ' + (r.error || 'sem resposta'));
-  }
-  setMode('IDLE', '◎');
-};
+// ── APPROVALS ──
+function loadApprovals() { return Store.get('approvals', { trusted: [], pending: [], policy: 'once' }); }
+function saveApprovals(a) { Store.set('approvals', a); }
 
-$('#toolCode').onclick = async () => {
-  const task = promptTool('O que você quer codar?', 'escreva uma função que ordena uma lista');
-  if (!task) return;
-  setMode('EXECUTING', '◈');
-  const r = await callAgentTool('code_helper', { task });
-  if (r.ok && r.result) {
-    toolResult(r.result.output || JSON.stringify(r.result));
-    add('assistant', `Code Helper: ${task.substring(0, 50)}`);
-  } else {
-    toolResult('Erro: ' + (r.error || 'sem resposta'));
-  }
-  setMode('IDLE', '◎');
-};
+let userName = localStorage.getItem('jarvis-username') || '';
+let alarms = Store.get('alarms', []);
+let activeAlarmTimeout = null;
+let activeAlarmInterval = null;
+let alarmAudio = null;
 
-$('#toolGames').onclick = async () => {
-  setMode('EXECUTING', '◈');
-  const r = await callAgentTool('game_updater', { action: 'list', platform: 'steam' });
-  if (r.ok && r.result) {
-    toolResult(r.result.output || JSON.stringify(r.result));
-    add('assistant', 'Games listados');
-  } else {
-    toolResult('Erro: ' + (r.error || 'sem resposta'));
-  }
-  setMode('IDLE', '◎');
-};
+function saveAlarms() { Store.set('alarms', alarms); }
 
-$('#toolAgent').onclick = async () => {
-  const goal = promptTool('Objetivo do agente:', 'pesquise frameworks Python e resuma');
-  if (!goal) return;
-  setMode('EXECUTING', '◈');
-  const r = await callAgentTool('create_plan', { goal });
-  if (r.ok && r.result) {
-    toolResult(r.result.output || JSON.stringify(r.result));
-    add('assistant', `Agent plan: ${goal.substring(0, 50)}`);
-  } else {
-    toolResult('Erro: ' + (r.error || 'sem resposta'));
-  }
-  setMode('IDLE', '◎');
-};
+function addAlarm(timeStr, label) {
+  // timeStr format: "HH:MM" or "HH:MM AM/PM"
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const alarm = { id, time: timeStr, label: label || 'Alarme', active: true, created: new Date().toISOString() };
+  alarms.push(alarm);
+  saveAlarms();
+  scheduleAlarm(alarm);
+  return alarm;
+}
 
-$('#toolReminder').onclick = async () => {
-  const name = promptTool('Nome do lembrete:', 'reunião');
-  const date = promptTool('Data (YYYY-MM-DD):', '2025-07-01');
-  const time = promptTool('Hora (HH:MM):', '14:00');
-  if (!name || !date) return;
-  setMode('EXECUTING', '◈');
-  const r = await callAgentTool('reminder', { action: 'set', name, date, time });
-  if (r.ok && r.result) {
-    toolResult(r.result.output || JSON.stringify(r.result));
-    add('assistant', `Lembrete: ${name} ${date} ${time}`);
-  } else {
-    toolResult('Erro: ' + (r.error || 'sem resposta'));
-  }
-  setMode('IDLE', '◎');
-};
+function addTimer(minutes, label) {
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const when = new Date(Date.now() + minutes * 60000);
+  const alarm = { id, time: when.toTimeString().slice(0, 5), label: label || 'Timer', active: true, created: new Date().toISOString(), isTimer: true, triggerAt: when.getTime() };
+  alarms.push(alarm);
+  saveAlarms();
+  scheduleAlarm(alarm);
+  return alarm;
+}
 
-setInterval(() => $('#clock').textContent = new Date().toLocaleTimeString('pt-BR'), 1000);
-refresh();
-loadConfig();
-setInterval(refresh, 10000);
-setInterval(checkDueReminders, 15000);
-add('assistant', 'Sistema local iniciado. Clique em Falar uma vez e diga: Jarvis, pesquise IA na internet; quero ouvir Queen; abra o YouTube; me dê uma opinião; envie para Hermes; detecte MCP Hermes OpenClaw. O microfone fica ativo até você dizer ou clicar em Parar voz.');
+function removeAlarm(id) {
+  alarms = alarms.filter(a => a.id !== id);
+  saveAlarms();
+}
+
+function listAlarms() { return alarms.filter(a => a.active); }
+
+function scheduleAlarm(alarm) {
+  const now = new Date();
+  let triggerTime;
+
+  if (alarm.triggerAt) {
+    triggerTime = alarm.triggerAt;
+  } else {
+    const [h, m] = alarm.time.split(':').map(Number);
+    triggerTime = new Date();
+    triggerTime.setHours(h, m, 0, 0);
+    if (triggerTime.getTime() <= now.getTime()) triggerTime.setDate(triggerTime.getDate() + 1);
+  }
+
+  const delay = triggerTime.getTime() - now.getTime();
+  if (delay <= 0) return;
+
+  setTimeout(() => {
+    if (alarm.active !== false) triggerAlarm(alarm);
+  }, delay);
+}
+
+function triggerAlarm(alarm) {
+  // 1) Tenta notificação do navegador
+  if ('Notification' in window && Notification.permission === 'granted') {
+    new Notification('⏰ ' + alarm.label, { body: 'Clique para parar', requireInteraction: true });
+  }
+
+  // 2) Toca áudio alto — Ironman do YouTube
+  playAlarmAudio();
+
+  // 3) Mostra modal de alarme na página
+  showAlarmModal(alarm);
+
+  // 4) Fala 3 vezes
+  let count = 0;
+  const speakInterval = setInterval(() => {
+    count++;
+    if (count <= 3) {
+      speak('⏰ ' + alarm.label + '! Hora de acordar! Clique em OK para parar.');
+    } else {
+      clearInterval(speakInterval);
+    }
+  }, 5000);
+  activeAlarmInterval = speakInterval;
+
+  // Marca timer como inativo
+  if (alarm.isTimer) {
+    alarm.active = false;
+    saveAlarms();
+  }
+}
+
+function playAlarmAudio() {
+  // Toca Ironman theme do YouTube em iframe oculto
+  if (alarmAudio) {
+    try { alarmAudio.remove(); } catch {}
+  }
+  const iframe = document.createElement('iframe');
+  iframe.id = 'alarm-audio-frame';
+  iframe.style.display = 'none';
+  // Ironman theme — vídeo curto e alto
+  iframe.src = 'https://www.youtube.com/embed/tgj48IWkXBg?autoplay=1&loop=1&playlist=tgj48IWkXBg';
+  iframe.allow = 'autoplay';
+  document.body.appendChild(iframe);
+  alarmAudio = iframe;
+}
+
+function stopAlarmAudio() {
+  if (alarmAudio) {
+    try { alarmAudio.remove(); } catch {}
+    alarmAudio = null;
+  }
+  if (activeAlarmInterval) {
+    clearInterval(activeAlarmInterval);
+    activeAlarmInterval = null;
+  }
+  stopSpeaking();
+}
+
+function showAlarmModal(alarm) {
+  // Remove modal anterior se existir
+  const old = $('#alarmModal');
+  if (old) old.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'alarmModal';
+  modal.className = 'alarm-modal-overlay';
+  modal.innerHTML = `
+    <div class="alarm-modal">
+      <div class="alarm-icon">⏰</div>
+      <div class="alarm-title">${alarm.label}</div>
+      <div class="alarm-time">${new Date().toLocaleTimeString('pt-BR')}</div>
+      <div class="alarm-msg">Hora de acordar, Senhor!</div>
+      <button id="alarmStopBtn" class="alarm-stop-btn">✅ OK — Parar Alarme</button>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  $('#alarmStopBtn')?.addEventListener('click', () => {
+    stopAlarmAudio();
+    modal.remove();
+  });
+}
+
+// Pede permissão de notificação ao iniciar
+if ('Notification' in window && Notification.permission === 'default') {
+  Notification.requestPermission();
+}
+
+// Reagenda alarmes ao carregar
+function rescheduleAlarms() {
+  alarms.forEach(a => { if (a.active) scheduleAlarm(a); });
+}
+
+// -- STORAGE --
+
+// -- VOICE --
+let audioCtx = null;
+let keepAliveInterval = null;
+
+function startKeepAlive() {
+  // Cria um oscilador silencioso para manter a página "ativa"
+  // Impede que Chrome/Firefox suspendam o reconhecimento em segundo plano
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  } catch {}
+  // Fallback: usa um <audio> com silêncio como keep-alive
+  if (!window._jarvisKeepAliveAudio) {
+    const audio = document.createElement('audio');
+    audio.id = 'jarvis-keepalive';
+    audio.loop = true;
+    audio.volume = 0.01;
+    // WAV de 1 segundo de silêncio (base64 mínimo)
+    audio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+    document.body.appendChild(audio);
+    window._jarvisKeepAliveAudio = audio;
+  }
+  try { window._jarvisKeepAliveAudio.play(); } catch {}
+  // Keep-alive periódico via visibility change
+  if (!keepAliveInterval) {
+    keepAliveInterval = setInterval(() => {
+      if (listening && recognition) {
+        try { recognition.start(); } catch {}
+      }
+    }, 5000);
+  }
+}
+
+function stopKeepAlive() {
+  try { window._jarvisKeepAliveAudio?.pause(); } catch {}
+  if (keepAliveInterval) { clearInterval(keepAliveInterval); keepAliveInterval = null; }
+  if (audioCtx) { try { audioCtx.close(); } catch {} audioCtx = null; }
+}
+
+function speak(text) {
+  if (!('speechSynthesis' in window)) return;
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = (loadConfig().VOICE_LANG || 'pt-BR'); u.rate = parseFloat(loadConfig().VOICE_RATE) || 1; u.pitch = parseFloat(loadConfig().VOICE_PITCH) || 0.95;
+  u.onstart = () => { const e = $('#voiceStatus'); if (e) e.textContent = '🔊 Falando...'; setMode('SPEAKING', '◉'); document.querySelector('.orb')?.classList.add('speaking'); document.querySelector('.orb')?.classList.remove('listening'); };
+  u.onend = () => { const e = $('#voiceStatus'); if (e) e.textContent = listening ? '🎙️ Ouvindo...' : 'Pronta.'; setMode(listening ? 'LISTENING' : 'PAGES', listening ? '◉' : '◎'); document.querySelector('.orb')?.classList.remove('speaking'); if (listening) document.querySelector('.orb')?.classList.add('listening'); };
+  window.speechSynthesis.speak(u);
+}
+function stopSpeaking() { if ('speechSynthesis' in window) window.speechSynthesis.cancel(); }
+
+function startListening() {
+  if (!SpeechRecognition) { const e = $('#voiceStatus'); if (e) e.textContent = 'Sem reconhecimento de voz.'; return; }
+
+  // Ativa keep-alive ANTES de iniciar o reconhecimento
+  startKeepAlive();
+
+  if (!recognition) {
+    recognition = new SpeechRecognition();
+    recognition.lang = loadConfig().VOICE_LANG || 'pt-BR';
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      listening = true;
+      const e = $('#voiceStatus'); if (e) e.textContent = '🎙️ Ouvindo...';
+      setMode('LISTENING', '◉');
+      document.querySelector('.orb')?.classList.add('listening');
+      document.querySelector('.orb')?.classList.remove('speaking');
+    };
+
+    recognition.onend = () => {
+      // Se ainda está no modo listening, reinicia IMEDIATAMENTE
+      if (listening) {
+        try { recognition.start(); } catch {}
+        return;
+      }
+      // Só para quando o usuário clicou em Parar
+      const e = $('#voiceStatus'); if (e) e.textContent = 'Pronta.';
+      setMode('PAGES', '◎');
+      document.querySelector('.orb')?.classList.remove('listening');
+      stopKeepAlive();
+    };
+
+    recognition.onerror = ev => {
+      // Ignora erros comuns de segundo plano
+      if (ev.error === 'no-speech' || ev.error === 'aborted' || ev.error === 'network') {
+        if (listening) { try { recognition.start(); } catch {} }
+        return;
+      }
+      // Erro real (ex: not-allowed)
+      if (ev.error === 'not-allowed') {
+        listening = false;
+        const e = $('#voiceStatus'); if (e) e.textContent = '❌ Microfone bloqueado. Permita o acesso.';
+        setMode('PAGES', '◎');
+        document.querySelector('.orb')?.classList.remove('listening');
+        stopKeepAlive();
+        return;
+      }
+      // Outros erros: tenta reiniciar
+      if (listening) { try { recognition.start(); } catch {} return; }
+      listening = false;
+      const e = $('#voiceStatus'); if (e) e.textContent = 'Erro: ' + (ev.error || '?');
+      setMode('PAGES', '◎');
+      document.querySelector('.orb')?.classList.remove('listening');
+      stopKeepAlive();
+    };
+
+    recognition.onresult = ev => {
+      const t = ev.results[ev.results.length - 1][0].transcript || '';
+      if (ev.results[ev.results.length - 1].isFinal) {
+        const ci = $('#commandInput'); if (ci) ci.value = t;
+        runCommand(t, true);
+      }
+    };
+  }
+
+  try { recognition.start(); } catch {}
+}
+
+function stopListening() {
+  listening = false;
+  if (recognition) { try { recognition.stop(); } catch {} }
+  const e = $('#voiceStatus'); if (e) e.textContent = '⏹️ Parada.';
+  setMode('PAGES', '◎');
+  document.querySelector('.orb')?.classList.remove('listening');
+  stopKeepAlive();
+}
+
+// -- UI --
+function setMode(mode, mood) { const m = $('#mode'); const o = $('#mood'); if (m) m.textContent = mode; if (o) o.textContent = mood || '◎'; }
+function addMessage(html, type) { const w = $('#messages'); if (!w) return; const d = document.createElement('div'); d.className = 'msg ' + (type || 'assistant'); d.innerHTML = html; w.appendChild(d); w.scrollTop = w.scrollHeight; }
+function addTyping() { const w = $('#messages'); if (!w) return null; const d = document.createElement('div'); d.className = 'msg assistant typing'; d.innerHTML = '<span class="dot"></span><span class="dot"></span><span class="dot"></span>'; w.appendChild(d); w.scrollTop = w.scrollHeight; return d; }
+function removeTyping(el) { if (el && el.parentNode) el.parentNode.removeChild(el); }
+function esc(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+
+// ── AI CHAT ──
+async function callAI(baseUrl, key, model, msgs) {
+  const r = await fetch(baseUrl.replace(/\/$/, '') + '/chat/completions', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + key }, body: JSON.stringify({ model, messages: msgs, max_tokens: 2048, temperature: 0.7 }) });
+  if (!r.ok) { const t = await r.text(); throw new Error('HTTP ' + r.status + ': ' + t.slice(0, 200)); }
+  const d = await r.json(); return d.choices?.[0]?.message?.content || 'Sem resposta.';
+}
+
+// ── OLLAMA — IA local (sem API key) ──
+async function callOllama(url, model, msgs) {
+  const r = await fetch(url.replace(/\/$/, '') + '/api/chat', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ model, messages: msgs, stream: false })
+  });
+  if (!r.ok) { const t = await r.text(); throw new Error('HTTP ' + r.status + ': ' + t.slice(0, 200)); }
+  const d = await r.json(); return d.message?.content || 'Sem resposta.';
+}
+
+async function aiChat(msg) {
+  const c = loadConfig();
+
+  // Modo ChatGPT ativo — usa prompt otimizado
+  if (window._chatgptActive && msg.startsWith('[CHATGPT]')) {
+    window._chatgptActive = false;
+    const userPrompt = msg.replace('[CHATGPT]', '').trim();
+    const sys = { role: 'system', content: window._chatgptSystem || 'Você é JARVIS. Responda em pt-BR. Seja direto e útil.' };
+    const msgs = [sys, { role: 'user', content: userPrompt }];
+    let reply = '';
+    if (c.AI_PROVIDER === 'ollama' && c.OLLAMA_ENABLED) reply = await callOllama(c.OLLAMA_URL, c.OLLAMA_MODEL, msgs);
+    else if (c.AI_PROVIDER === 'openrouter' && c.OPENROUTER_API_KEY) reply = await callAI('https://openrouter.ai/api/v1', c.OPENROUTER_API_KEY, c.OPENROUTER_MODEL, msgs);
+    else if (c.AI_PROVIDER === 'openai' && c.OPENAI_API_KEY) reply = await callAI(c.OPENAI_BASE_URL, c.OPENAI_API_KEY, c.OPENAI_MODEL, msgs);
+    else if (c.AI_PROVIDER === 'nvidia' && c.NVIDIA_API_KEY) reply = await callAI('https://integrate.api.nvidia.com/v1', c.NVIDIA_API_KEY, c.NVIDIA_MODEL, msgs);
+    else reply = localReply(userPrompt);
+
+    const type = window._chatgptType || 'chat';
+    if (type === 'image') return '🎨 Descrição para imagem gerada:\n\n' + reply + '\n\n✨ Cole esta descrição no ChatGPT ou DALL-E para gerar a imagem.';
+    if (type === 'code') return '💻 Código gerado:\n\n' + reply;
+    return reply;
+  }
+
+  // Modo normal
+  const mem = loadMemory().slice(-10).map(m => ({ role: m.role === 'preference' ? 'system' : m.role, content: m.text }));
+  const sys = { role: 'system', content: 'Você é JARVIS. Responda em pt-BR. Seja direto, claro e curto (máx 3 frases). Nunca seja repetitivo.' };
+  const msgs = [sys, ...mem, ...conversationContext.slice(-6), { role: 'user', content: msg }];
+  if (c.AI_PROVIDER === 'ollama' && c.OLLAMA_ENABLED) return callOllama(c.OLLAMA_URL, c.OLLAMA_MODEL, msgs);
+  if (c.AI_PROVIDER === 'openrouter' && c.OPENROUTER_API_KEY) return callAI('https://openrouter.ai/api/v1', c.OPENROUTER_API_KEY, c.OPENROUTER_MODEL, msgs);
+  if (c.AI_PROVIDER === 'openai' && c.OPENAI_API_KEY) return callAI(c.OPENAI_BASE_URL, c.OPENAI_API_KEY, c.OPENAI_MODEL, msgs);
+  if (c.AI_PROVIDER === 'nvidia' && c.NVIDIA_API_KEY) return callAI('https://integrate.api.nvidia.com/v1', c.NVIDIA_API_KEY, c.NVIDIA_MODEL, msgs);
+  return localReply(msg);
+}
+
+// 
+// LOCAL REPLY — Motor inteligente com diálogo natural
+// 
+function localReply(cmd) {
+  const text = (cmd || '').toLowerCase().trim();
+  if (!text) return 'Estou ouvindo.';
+
+  // -- RESPOSTAS A PERGUNTAS DO JARVIS --
+  if (lastQuestion) {
+    const pendingQuestion = lastQuestion;
+    lastQuestion = null;
+    if (pendingQuestion === 'name') {
+      userName = cmd.trim().split(' ')[0];
+      localStorage.setItem('jarvis-username', userName);
+      conversationContext.push({ role: 'user', content: cmd });
+      return 'Prazer, ' + userName + '! Como posso ajudar?';
+    }
+    if (pendingQuestion === 'search') {
+      window.open('https://www.google.com/search?q=' + encodeURIComponent(cmd), '_blank');
+      conversationContext.push({ role: 'user', content: cmd });
+      return 'Pesquisando "' + cmd + '".';
+    }
+    if (pendingQuestion === 'open_app') {
+      const opened = tryOpenApp(cmd);
+      if (opened) return opened;
+      return 'Não reconheci "' + cmd + '". Quer que eu pesquise como abrir esse programa?';
+    }
+    conversationContext.push({ role: 'user', content: cmd });
+    return 'Entendido: "' + cmd + '". Mais alguma coisa?';
+  }
+
+  // 
+  // CHATGPT — Interação direta via API (antes do nome para evitar conflito)
+  // 
+  const chatgptPatterns = [
+    /(?:criar|gerar|crie|gere|desenhar|desenhe|fazer|faça)\s+(?:uma?\s+)?(?:imagem|foto|ilustração|ilustracao|desenho|arte|picture|image)\s+(?:de|do|da|com|sobre)?\s*(.+)/i,
+    /(?:imagem|foto|ilustração|ilustracao|desenho|arte)\s+(?:de|do|da|com|sobre)\s*(.+)/i,
+    /(?:quero|preciso|me\s+(?:dá|da)|mostre)\s+(?:uma?\s+)?(?:imagem|foto|ilustração|ilustracao|desenho|arte)\s+(?:de|do|da|com|sobre)?\s*(.+)/i,
+    /(?:criar|escrever|crie|escreva|fazer|faça|gerar|gere|programar|programe)\s+(?:um|uma)?\s+(?:programa|código|codigo|script|aplicativo|aplicação|app|bot|jogo|site|página|pagina|html|python|javascript|java|c\+\+|php|ruby|rust|go|swift|kotlin)\s*(?:de|do|da|para|que|com|sobre|:)?\s*(.+)?/i,
+    /(?:programa|código|codigo|script|aplicativo|app|bot|jogo|site)\s+(?:de|do|da|para|que|com|sobre)\s*(.+)/i,
+    /(?:perguntar|pergunte|diga|diz|fale|falar|converse|conversar|pedir|peça|peça\s+para)\s+(?:ao\s+)?(?:chatgpt|chat\s*gpt|gpt|ia|ai)\s*(?:sobre|de|do|da|para|que|com|:)?\s*(.+)/i,
+    /(?:chatgpt|chat\s*gpt|gpt)\s*(?:sobre|de|do|da|para|que|com|:)?\s*(.+)/i,
+    /(?:abrir|abre)\s+(?:o\s+)?(?:chatgpt|chat\s*gpt|gpt)/i,
+  ];
+
+  for (const pattern of chatgptPatterns) {
+    const match = cmd.match(pattern);
+    if (match) {
+      const isImageCmd = text.includes('imagem') || text.includes('foto') || text.includes('ilustra') || text.includes('desenho') || text.includes('arte') || text.includes('image') || text.includes('picture');
+      const isCodeCmd = text.includes('programa') || text.includes('código') || text.includes('codigo') || text.includes('script') || text.includes('aplicativo') || text.includes('app') || text.includes('bot') || text.includes('jogo') || text.includes('site') || text.includes('html') || text.includes('python') || text.includes('javascript');
+      const userRequest = match[1] ? match[1].trim() : '';
+
+      let systemPrompt = '';
+      let userPrompt = '';
+
+      if (isImageCmd) {
+        const desc = userRequest || cmd.replace(/criar|gerar|crie|gere|desenhar|desenhe|fazer|faça|uma|imagem|foto|ilustração|de|do|da|com|sobre/gi, '').trim();
+        systemPrompt = 'Você é um especialista em geração de imagens. Descreva a imagem em inglês com máximo detalhe visual para DALL-E. Formato: cena, estilo, iluminação, cores, composição. Máximo 200 palavras.';
+        userPrompt = 'Descreva detalhadamente em inglês uma imagem de: ' + desc;
+      } else if (isCodeCmd) {
+        const lang = text.match(/(python|javascript|java|c\+\+|php|ruby|rust|go|swift|kotlin|html|css|sql|bash|powershell|typescript)/i);
+        const langStr = lang ? lang[1] : 'Python';
+        const task = userRequest || cmd.replace(/criar|escrever|crie|escreva|fazer|faça|gerar|gere|programar|programe|programa|código|codigo|script|aplicativo|app|bot|jogo|site|de|do|da|para|que|com|sobre/gi, '').trim();
+        systemPrompt = 'Você é um programador sênior. Escreva código limpo, comentado e funcional. Inclua exemplo de uso. Linguagem: ' + langStr;
+        userPrompt = 'Escreva um programa em ' + langStr + ' que ' + task + '. Inclua comentários explicativos e exemplo de uso.';
+      } else {
+        const topic = userRequest || cmd.replace(/chatgpt|chat\s*gpt|gpt|perguntar|pergunte|diga|diz|fale|falar|converse|conversar|pedir|peça|ao|sobre|de|do|da|para|que|com/gi, '').trim();
+        systemPrompt = 'Você é JARVIS, assistente inteligente. Responda em português brasileiro de forma clara, direta e útil. Máximo 4 frases.';
+        userPrompt = topic;
+      }
+
+      const cfg = loadConfig();
+      const hasAPI = (cfg.AI_PROVIDER === 'openrouter' && cfg.OPENROUTER_API_KEY) || (cfg.AI_PROVIDER === 'openai' && cfg.OPENAI_API_KEY) || (cfg.AI_PROVIDER === 'nvidia' && cfg.NVIDIA_API_KEY);
+
+      if (hasAPI) {
+        window._chatgptActive = true;
+        window._chatgptSystem = systemPrompt;
+        window._chatgptPrompt = userPrompt;
+        window._chatgptType = isImageCmd ? 'image' : (isCodeCmd ? 'code' : 'chat');
+        runCommand('[CHATGPT]' + userPrompt, false);
+        return '__CHATGPT_API__';
+      }
+
+      window.open('https://chat.openai.com/?model=auto', '_blank');
+      if (isImageCmd) {
+        const desc = userRequest || cmd;
+        return '🎨 ChatGPT aberto. Cole este prompt:\n"Crie uma imagem detalhada de ' + desc + '. Estilo realista, iluminação cinematográfica, alta qualidade."';
+      }
+      if (isCodeCmd) {
+        const lang = text.match(/(python|javascript|java|c\+\+|php|ruby|rust|go|swift|kotlin|html|css|sql|bash|powershell|typescript)/i);
+        const langStr = lang ? lang[1] : '';
+        const task = userRequest || cmd;
+        const codePrompt = langStr ? 'Escreva um programa em ' + langStr + ' que ' + task + '. Código limpo, comentado, com exemplo de uso.' : 'Escreva um programa: ' + task;
+        return '💻 ChatGPT aberto. Cole este prompt:\n"' + codePrompt + '"';
+      }
+      const topic = userRequest || cmd;
+      return '🤖 ChatGPT aberto. Pergunte:\n"' + topic + '"';
+    }
+  }
+
+  // -- IDENTIFICAÇÃO DO USUÁRIO --
+  const nameMatch = text.match(/(?:meu nome é|me chamo|sou o|meu nome e)\s+(.+)/i);
+  if (nameMatch) {
+    userName = nameMatch[1].trim().split(' ')[0];
+    localStorage.setItem('jarvis-username', userName);
+    return 'Prazer, ' + userName + '! Como posso ajudar?';
+  }
+  if ((text.includes('quem sou eu') || text.includes('meu nome')) && userName) {
+    return 'Você é ' + userName + ', Senhor.';
+  }
+
+  // -- STATUS --
+  if (text === 'status' || text.includes('como você está') || text.includes('tudo bem'))
+    return 'Sistema OK. Memória: ' + loadMemory().length + ' entradas. Lembretes: ' + listReminders().length + '.';
+
+  // -- VOZ --
+  if (text.includes('testar voz') || text.includes('testa voz') || text === 'fala' || text === 'voz')
+    return 'Voz online, Senhor.';
+  if (text.includes('parar voz') || text.includes('para voz') || text.includes('calar') || text.includes('silêncio') || text === 'stop') {
+    stopSpeaking(); stopListening(); return 'Voz pausada.';
+  }
+
+  // -- YOUTUBE --
+  if (text.includes('youtube') || text.includes('abrir yt') || text === 'yt') { window.open('https://www.youtube.com', '_blank'); return 'Abrindo YouTube.'; }
+  const ytM = text.match(/(?:pesquisar|buscar|procurar|tocar|ouvir)\s+(?:no\s+)?youtube\s+(.+)/i) || text.match(/youtube\s+(.+)/i);
+  if (ytM) { window.open('https://www.youtube.com/results?search_query=' + encodeURIComponent(ytM[1].trim()), '_blank'); return 'Pesquisando "' + ytM[1].trim() + '" no YouTube.'; }
+
+  // -- PESQUISA --
+  const sM = text.match(/(?:pesquisar|buscar|procurar)\s+(?:na\s+)?(?:internet|google|web)?\s*(.+)/i);
+  if (sM) { const q = sM[1].replace(/^(sobre|por|de|do|da|o|a|os|as|um|uma)\s+/i, '').trim(); if (q) { window.open('https://www.google.com/search?q=' + encodeURIComponent(q), '_blank'); return 'Pesquisando "' + q + '".'; } }
+  if (text.includes('pesquis') || text.includes('buscar') || text.includes('procurar')) {
+    const cl = cmd.replace(/^(jarvis|por favor|,)\s*/i, '').replace(/pesquis(e|ar)|buscar|procurar|na internet|no google/gi, '').trim();
+    if (cl.length > 2) { window.open('https://www.google.com/search?q=' + encodeURIComponent(cl), '_blank'); return 'Pesquisando "' + cl + '".'; }
+  }
+  if (text.includes('abrir navegador') || text.includes('abrir browser') || text.includes('abrir google') || text.includes('navegador')) { window.open('https://www.google.com', '_blank'); return 'Abrindo Google.'; }
+
+  // 
+  // 
+  // INTEGRAÇÕES — Apps Web + Programas do PC
+  // 
+
+  // -- E-MAIL --
+  if (text.includes('email') || text.includes('e-mail') || text.includes('correio')) {
+    const emailCmd = text.match(/(?:enviar?|escrever|compor|mandar?)\s+(?:e[-]?email|email|mensagem)\s+(?:para\s+)?(.+)/i);
+    if (emailCmd) { const to = emailCmd[1].trim(); window.open('mailto:' + to, '_blank'); return 'Abrindo e-mail para ' + to + '.'; }
+    if (text.includes('gmail')) { window.open('https://mail.google.com', '_blank'); return 'Abrindo Gmail.'; }
+    if (text.includes('outlook') || text.includes('hotmail')) { window.open('https://outlook.live.com', '_blank'); return 'Abrindo Outlook.'; }
+    if (text.includes('yahoo')) { window.open('https://mail.yahoo.com', '_blank'); return 'Abrindo Yahoo Mail.'; }
+    window.open('https://mail.google.com', '_blank'); return 'Abrindo Gmail.';
+  }
+  if (text === 'gmail' || text.includes('abrir gmail')) { window.open('https://mail.google.com', '_blank'); return 'Abrindo Gmail.'; }
+  if (text === 'outlook' || text.includes('abrir outlook')) { window.open('https://outlook.live.com', '_blank'); return 'Abrindo Outlook.'; }
+
+  // -- WHATSAPP --
+  if (text.includes('whatsapp') || text.includes('whats')) {
+    if (text.includes('web') || text.includes('computador') || text.includes('pc')) { window.open('https://web.whatsapp.com', '_blank'); return 'Abrindo WhatsApp Web.'; }
+    const wMatch = text.match(/(?:whatsapp|whats)\s+(?:para\s+)?(\d[\d\s\-().+]{6,})/i);
+    if (wMatch) { const num = wMatch[1].replace(/[\s\-().+]/g, ''); const msgMatch = text.match(/(?:dizendo|mensagem|falando|enviar?)\s+["']?(.+?)["']?\s*$/i); const msg = msgMatch ? encodeURIComponent(msgMatch[1].trim()) : ''; window.open('https://wa.me/' + num + (msg ? '?text=' + msg : ''), '_blank'); return 'Abrindo WhatsApp para ' + wMatch[1].trim() + '.'; }
+    window.open('https://web.whatsapp.com', '_blank'); return 'Abrindo WhatsApp Web.';
+  }
+
+  // -- REDES SOCIAIS --
+  if (text.includes('instagram') || text === 'insta') { window.open('https://www.instagram.com', '_blank'); return 'Abrindo Instagram.'; }
+  if (text.includes('twitter') || text === 'x.com' || text === 'x') { window.open('https://x.com', '_blank'); return 'Abrindo X.'; }
+  if (text.includes('facebook') || text === 'face') { window.open('https://www.facebook.com', '_blank'); return 'Abrindo Facebook.'; }
+  if (text.includes('linkedin')) { window.open('https://www.linkedin.com', '_blank'); return 'Abrindo LinkedIn.'; }
+  if (text.includes('tiktok') || text === 'tik tok') { window.open('https://www.tiktok.com', '_blank'); return 'Abrindo TikTok.'; }
+  if (text.includes('telegram')) { window.open('https://web.telegram.org', '_blank'); return 'Abrindo Telegram.'; }
+  if (text.includes('discord')) { window.open('https://discord.com/app', '_blank'); return 'Abrindo Discord.'; }
+  if (text.includes('slack')) { window.open('https://app.slack.com', '_blank'); return 'Abrindo Slack.'; }
+  if (text.includes('teams') || text.includes('microsoft teams')) { window.open('https://teams.microsoft.com', '_blank'); return 'Abrindo Teams.'; }
+  if (text.includes('zoom')) { window.open('https://zoom.us/join', '_blank'); return 'Abrindo Zoom.'; }
+  if (text.includes('meet') || text.includes('google meet')) { window.open('https://meet.google.com', '_blank'); return 'Abrindo Google Meet.'; }
+  if (text.includes('skype')) { window.open('https://web.skype.com', '_blank'); return 'Abrindo Skype.'; }
+  if (text.includes('pinterest')) { window.open('https://www.pinterest.com', '_blank'); return 'Abrindo Pinterest.'; }
+  if (text.includes('reddit')) { window.open('https://www.reddit.com', '_blank'); return 'Abrindo Reddit.'; }
+
+  // -- STREAMING --
+  if (text.includes('netflix')) { window.open('https://www.netflix.com', '_blank'); return 'Abrindo Netflix.'; }
+  if (text.includes('spotify')) { window.open('https://open.spotify.com', '_blank'); return 'Abrindo Spotify.'; }
+  if (text.includes('disney') || text.includes('disney+')) { window.open('https://www.disneyplus.com', '_blank'); return 'Abrindo Disney+.'; }
+  if (text.includes('hbo') || text.includes('max')) { window.open('https://www.max.com', '_blank'); return 'Abrindo HBO Max.'; }
+  if (text.includes('prime video') || text.includes('amazon prime')) { window.open('https://www.primevideo.com', '_blank'); return 'Abrindo Prime Video.'; }
+  if (text.includes('youtube music')) { window.open('https://music.youtube.com', '_blank'); return 'Abrindo YouTube Music.'; }
+  if (text.includes('twitch')) { window.open('https://www.twitch.tv', '_blank'); return 'Abrindo Twitch.'; }
+  if (text.includes('apple tv') || text.includes('appletv')) { window.open('https://tv.apple.com', '_blank'); return 'Abrindo Apple TV.'; }
+  if (text.includes('globoplay') || text.includes('globo play')) { window.open('https://globoplay.globo.com', '_blank'); return 'Abrindo Globoplay.'; }
+
+  // -- TRABALHO / PRODUTIVIDADE --
+  if (text.includes('google drive') || text === 'drive') { window.open('https://drive.google.com', '_blank'); return 'Abrindo Google Drive.'; }
+  if (text.includes('google docs') || text === 'docs') { window.open('https://docs.google.com', '_blank'); return 'Abrindo Google Docs.'; }
+  if (text.includes('google sheets') || text.includes('planilha')) { window.open('https://sheets.google.com', '_blank'); return 'Abrindo Google Sheets.'; }
+  if (text.includes('google calendar') || text.includes('calendário') || text.includes('calendario') || text.includes('agenda')) { window.open('https://calendar.google.com', '_blank'); return 'Abrindo Calendar.'; }
+  if (text.includes('notion')) { window.open('https://www.notion.so', '_blank'); return 'Abrindo Notion.'; }
+  if (text.includes('trello')) { window.open('https://trello.com', '_blank'); return 'Abrindo Trello.'; }
+  if (text.includes('github')) { window.open('https://github.com', '_blank'); return 'Abrindo GitHub.'; }
+  if (text.includes('gitlab')) { window.open('https://gitlab.com', '_blank'); return 'Abrindo GitLab.'; }
+  if (text.includes('figma')) { window.open('https://www.figma.com', '_blank'); return 'Abrindo Figma.'; }
+  if (text.includes('canva')) { window.open('https://www.canva.com', '_blank'); return 'Abrindo Canva.'; }
+  if (text.includes('dropbox')) { window.open('https://www.dropbox.com', '_blank'); return 'Abrindo Dropbox.'; }
+  if (text.includes('onedrive') || text.includes('one drive')) { window.open('https://onedrive.live.com', '_blank'); return 'Abrindo OneDrive.'; }
+
+  // -- COMPRAS / FINANCEIRO --
+  if (text.includes('amazon')) { window.open('https://www.amazon.com.br', '_blank'); return 'Abrindo Amazon.'; }
+  if (text.includes('mercado livre') || text.includes('mercadolibre')) { window.open('https://www.mercadolivre.com.br', '_blank'); return 'Abrindo Mercado Livre.'; }
+  if (text.includes('olx')) { window.open('https://www.olx.com.br', '_blank'); return 'Abrindo OLX.'; }
+  if (text.includes('shopee')) { window.open('https://shopee.com.br', '_blank'); return 'Abrindo Shopee.'; }
+  if (text.includes('nubank') || text.includes('banco')) { window.open('https://app.nubank.com.br', '_blank'); return 'Abrindo Nubank.'; }
+  if (text.includes('ifood')) { window.open('https://www.ifood.com.br', '_blank'); return 'Abrindo iFood.'; }
+  if (text.includes('rappi')) { window.open('https://www.rappi.com.br', '_blank'); return 'Abrindo Rappi.'; }
+
+  // -- NOTÍCIAS --
+  if (text.includes('notícia') || text.includes('noticia') || text.includes('jornal')) { window.open('https://news.google.com', '_blank'); return 'Abrindo notícias.'; }
+  if (text.includes('g1') || text.includes('globo')) { window.open('https://g1.globo.com', '_blank'); return 'Abrindo G1.'; }
+  if (text.includes('uol')) { window.open('https://www.uol.com.br', '_blank'); return 'Abrindo UOL.'; }
+  if (text.includes('cnn')) { window.open('https://www.cnnbrasil.com.br', '_blank'); return 'Abrindo CNN.'; }
+  if (text.includes('folha')) { window.open('https://www.folha.uol.com.br', '_blank'); return 'Abrindo Folha.'; }
+
+  // -- MAPAS / TRANSPORTE --
+  if (text.includes('google maps') || text.includes('mapa')) { window.open('https://maps.google.com', '_blank'); return 'Abrindo Google Maps.'; }
+  if (text.includes('waze')) { window.open('https://www.waze.com/live-map', '_blank'); return 'Abrindo Waze.'; }
+  if (text.includes('uber')) { window.open('https://m.uber.com', '_blank'); return 'Abrindo Uber.'; }
+  if (text.includes('99') || text.includes('nove nove')) { window.open('https://99app.com', '_blank'); return 'Abrindo 99.'; }
+
+  // 
+  // PROGRAMAS DO COMPUTADOR (Windows)
+  // Usa protocol handlers do Windows via window.open
+  //
+  function tryOpenApp(appName) {
+    const a = appName.toLowerCase().trim();
+    const prot = {
+      'calculadora': 'ms-calculator:', 'calc': 'ms-calculator:', 'calculador': 'ms-calculator:',
+      'bloco de notas': 'notepad:', 'notepad': 'notepad:', 'bloco': 'notepad:', 'notas': 'notepad:',
+      'paint': 'ms-paint:', 'pintura': 'ms-paint:',
+      'explorador': 'file:///C:/', 'arquivos': 'file:///C:/', 'gerenciador de arquivos': 'file:///C:/',
+      'documentos': 'file:///C://Users/' + (process?.env?.USERNAME || 'Usuario') + '/Documents',
+      'downloads': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Downloads',
+      'música': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Music',
+      'musica': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Music',
+      'imagens': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Pictures',
+      'fotos': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Pictures',
+      'vídeos': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Videos',
+      'videos': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Videos',
+      'desktop': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Desktop',
+      'area de trabalho': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Desktop',
+      'configurações': 'ms-settings:', 'configuracoes': 'ms-settings:', 'config': 'ms-settings:',
+      'painel de controle': 'control:', 'painel': 'control:',
+      'terminal': 'wt:', 'cmd': 'cmd:', 'prompt': 'cmd:',
+      'vscode': 'vscode:', 'visual studio code': 'vscode:',
+      'steam': 'steam:', 'epic games': 'com.epicgames.launcher:',
+      'photoshop': 'photoshop:', 'illustrator': 'illustrator:',
+      'blender': 'blender:', 'obs': 'obs-studio:',
+      'gerenciador de tarefas': 'taskmgr:', 'task manager': 'taskmgr:',
+      'editor de registro': 'regedit:', 'registro': 'regedit:',
+      'limpeza de disco': 'cleanmgr:', 'disco': 'cleanmgr:',
+      'conexão remota': 'mstss:', 'rdp': 'mstsc:',
+      'windows defender': 'windowsdefender:', 'defender': 'windowsdefender:',
+      'loja': 'ms-windows-store:', 'microsoft store': 'ms-windows-store:',
+      'email': 'mailto:', 'correio': 'mailto:',
+      'contatos': 'ms-people:', 'pessoas': 'ms-people:',
+      'fotos do windows': 'ms-photos:', 'galeria': 'ms-photos:',
+      'gravador': 'ms-soundrecorder:', 'gravador de som': 'ms-soundrecorder:',
+      'relógio': 'ms-clock:', 'alarme': 'ms-clock:', 'cronômetro': 'ms-clock:',
+      'mapas do windows': 'bingmaps:', 'mapas': 'bingmaps:',
+      'filmes e tv': 'ms-moviesandtv:', 'movies': 'ms-moviesandtv:',
+      'ajuda': 'ms-help:', 'suporte': 'ms-help:'
+    };
+
+    // MS Office e apps especiais via shell
+    const shellApps = {
+      'word': 'winword',
+      'excel': 'excel',
+      'powerpoint': 'powerpnt',
+      'power point': 'powerpnt',
+      'outlook': 'outlook',
+      'onenote': 'onenote',
+      'teams': 'teams',
+      'access': 'msaccess',
+      'publisher': 'mspub',
+    };
+
+    // Tenta protocol handler primeiro
+    const p = prot[a];
+    if (p) { window.open(p, '_blank'); return 'Abrindo ' + appName + '.'; }
+
+    // Tenta shell app (MS Office etc)
+    const shellCmd = shellApps[a];
+    if (shellCmd) {
+      window.open('shell:AppsFolder\\' + shellCmd, '_blank');
+      return 'Abrindo ' + appName + '.';
+    }
+
+    return null;
+  }
+
+  // -- ABRIR PROGRAMAS DO PC --
+  const openMatch = text.match(/(?:abrir|abre|abra|executar|execute|inicie|iniciar)\s+(?:o|a|os|as)?\s*(.+)/i);
+  if (openMatch) {
+    const app = openMatch[1].trim();
+    const webApps = ['gmail','outlook','yahoo','whatsapp','instagram','twitter','facebook','linkedin','telegram','discord','slack','teams','zoom','meet','skype','netflix','spotify','disney','hbo','max','prime','twitch','apple tv','globoplay','drive','docs','sheets','calendar','notion','trello','github','gitlab','figma','canva','dropbox','onedrive','amazon','mercado','olx','shopee','nubank','ifood','rappi','notícia','noticia','g1','uol','cnn','folha','maps','waze','uber','99','navegador','browser','google','youtube','email','e-mail','correio','pesquisar','buscar','procurar'];
+    if (!webApps.some(w => app.toLowerCase().includes(w))) {
+      const result = tryOpenApp(app);
+      if (result) return result;
+      // Perguntar ao usuário
+      lastQuestion = 'open_app';
+      return 'Não reconheci "' + app + '". Quer que eu pesquise como abrir esse programa?';
+    }
+  }
+
+  // -- MÚSICA --
+  if (text.includes('música') || text.includes('musica') || text.includes('tocar') || text.includes('ouvir') || text.includes('quero ouvir')) {
+    const am = text.match(/(?:tocar|ouvir|música|musica)\s+(.+)/i);
+    if (am) { window.open('https://www.youtube.com/results?search_query=' + encodeURIComponent(am[1].trim()), '_blank'); return 'Buscando: ' + am[1].trim() + '.'; }
+    window.open('https://music.youtube.com', '_blank'); return 'Abrindo YouTube Music.';
+  }
+
+  // -- CALCULADORA --
+  if (text.includes('calculadora') || text.includes('calcul') || text.includes('calcular')) { window.open('ms-calculator:', '_blank'); return 'Abrindo calculadora.'; }
+
+  // 
+  // ALARMES & TIMERS
+  // 
+
+  // Me acorde [hora] da [manhã/tarde/noite]
+  const alarmMatch = cmd.match(/(?:me\s+)?acorde\s+(?:às\s+|as\s+)?(\d{1,2})[:\s](\d{2})?\s*(?:da\s+)?(manh[ãa]|tarde|noite|madrugada)?/i) ||
+                      cmd.match(/(?:me\s+)?acorde\s+(?:às\s+|as\s+)?(\d{1,2})\s*(?:da\s+)?(manh[ãa]|tarde|noite|madrugada)/i);
+  if (alarmMatch) {
+    let hour = parseInt(alarmMatch[1]);
+    const min = alarmMatch[2] ? parseInt(alarmMatch[2]) : 0;
+    const period = alarmMatch[3] ? alarmMatch[3].toLowerCase() : null;
+
+    if (period) {
+      if ((period.includes('tarde') || period.includes('noite')) && hour < 12) hour += 12;
+      if (period.includes('madrugada') && hour >= 6) hour += 12;
+      if (period.includes('manh') && hour === 12) hour = 0;
+    }
+
+    const timeStr = String(hour).padStart(2, '0') + ':' + String(min).padStart(2, '0');
+    const label = 'Alarme ' + timeStr + (period ? ' da ' + period : '');
+    addAlarm(timeStr, label);
+    return '⏰ Alarme definido para ' + timeStr + (period ? ' da ' + period : '') + '. Vou tocar Ironman para acordar!';
+  }
+
+  // Timer: "me acorde em X minutos/horas"
+  const timerMatch = cmd.match(/(?:me\s+)?acorde\s+em\s+(\d+)\s*(?:min|minutos?|h|horas?)/i) ||
+                      cmd.match(/(?:timer|cronômetro|cronometro|contar)\s+(?:de\s+)?(\d+)\s*(?:min|minutos?|h|horas?)/i);
+  if (timerMatch) {
+    const amount = parseInt(timerMatch[1]);
+    const isHours = text.includes('hora') || text.includes('h');
+    const minutes = isHours ? amount * 60 : amount;
+    const label = 'Timer ' + amount + (isHours ? 'h' : 'min');
+    addTimer(minutes, label);
+    return '⏱️ Timer de ' + amount + (isHours ? ' hora(s)' : ' minuto(s)') + ' iniciado. Vou te avisar!';
+  }
+
+  // Listar alarmes
+  if ((text.includes('alarme') || text.includes('timer')) && (text.includes('listar') || text.includes('mostrar') || text.includes('quais') || text.includes('ver'))) {
+    const a = listAlarms();
+    if (!a.length) return 'Nenhum alarme ativo.';
+    return 'Alarmes:\n' + a.map(x => '• ' + x.time + ' — ' + x.label + (x.isTimer ? ' (timer)' : '')).join('\n');
+  }
+
+  // Cancelar alarmes
+  if ((text.includes('alarme') || text.includes('timer')) && (text.includes('cancelar') || text.includes('apagar') || text.includes('remover') || text.includes('parar'))) {
+    const a = listAlarms();
+    if (!a.length) return 'Nenhum alarme para cancelar.';
+    a.forEach(x => removeAlarm(x.id));
+    return 'Todos os alarmes foram cancelados.';
+  }
+
+  // Parar alarme tocando agora
+  if (text.includes('parar alarme') || text.includes('desligar alarme') || text.includes('parar música') || text.includes('parar audio') || text.includes('parar som')) {
+    stopAlarmAudio();
+    return 'Alarme parado.';
+  }
+
+  // -- LEMBRETES --
+  if (text.includes('lembre') || text.includes('lembrar') || text.includes('lembret')) {
+    if (text.includes('listar') || text.includes('mostrar') || text.includes('quais') || text.includes('ver')) {
+      const r = listReminders(); if (!r.length) return 'Nenhum lembrete ativo.';
+      return 'Lembretes:\n' + r.map(x => '• ' + x.text + (x.when ? ' (' + new Date(x.when).toLocaleString('pt-BR') + ')' : '')).join('\n');
+    }
+    if (text.includes('limpar') || text.includes('apagar todos') || text.includes('remover todos')) { saveReminders([]); return 'Lembretes removidos.'; }
+    const p = parseReminder(cmd);
+    if (p) { addReminder(p.text, p.when); return 'Lembrete: "' + p.text + '"' + (p.when ? ' para ' + new Date(p.when).toLocaleString('pt-BR') : '') + '.'; }
+    return 'Diga: "Lembre de [algo] em 10 minutos" ou "Lembre de [algo] amanhã às 15:30".';
+  }
+
+  // -- MEMÓRIA --
+  if (text.includes('memória') || text.includes('memoria') || text.includes('o que você sabe') || text.includes('suas memórias')) {
+    const m = loadMemory(); if (!m.length) return 'Memória vazia.';
+    const prefs = m.filter(x => x.role === 'preference');
+    const conv = m.filter(x => x.role !== 'preference').slice(-5).map(x => x.role + ': ' + x.text.slice(0, 100)).join('\n');
+    return 'Conversas:\n' + conv + (prefs.length ? '\n\nPreferências:\n' + prefs.map(x => '• ' + x.text).join('\n') : '');
+  }
+  if (text.includes('apagar memória') || text.includes('limpar memória') || text.includes('esquecer tudo')) { saveMemory([]); conversationContext = []; return 'Memória limpa.'; }
+  if (text.includes('esquecer prefer')) { saveMemory(loadMemory().filter(x => x.role !== 'preference')); return 'Preferências removidas.'; }
+
+  const lM = cmd.match(/(?:aprenda que|lembre-se que|guarde que|saiba que|esqueça que)\s+(.+)/i);
+  if (lM) { const info = lM[1].trim(); if (text.includes('esque')) { saveMemory(loadMemory().filter(x => x.role !== 'preference' || x.text.toLowerCase() !== info.toLowerCase())); return 'Preferência removida.'; } appendMemory('preference', info); return 'Aprendi: ' + info; }
+
+  // -- HORA / DATA --
+  if ((text.includes('hor') && (text.includes('são') || text.includes('sao') || text.includes('é') || text.includes('e'))) || text === 'hora' || text === 'que horas')
+    return 'Agora são ' + new Date().toLocaleTimeString('pt-BR') + '.';
+  if (text.includes('data') || (text.includes('dia') && (text.includes('hoje') || text.includes('é') || text.includes('e'))))
+    return 'Hoje é ' + new Date().toLocaleDateString('pt-BR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) + '.';
+
+  // -- CLIMA --
+  if (text.includes('clima') || text.includes('tempo') || text.includes('temperatura') || text.includes('previsão') || text.includes('previsao'))
+    { window.open('https://www.google.com/search?q=previsão+do+tempo', '_blank'); return 'Abrindo previsão do tempo.'; }
+
+  // -- CONVERSA LIVRE --
+  if (text.includes('converse') || text.includes('papo') || text.includes('bater papo') || text.includes('conversar')) {
+    lastQuestion = 'chat';
+    return 'Claro! Sobre o que quer conversar?';
+  }
+
+  // -- REMOVE OLLAMA --
+  if (text.includes('remove ollama') || text.includes('remover ollama') || text.includes('desativar ollama') || text.includes('ollama off')) {
+    saveConfig({ OLLAMA_ENABLED: false, AI_PROVIDER: 'local' });
+    return '🦙 Ollama desativado. Provedor alterado para Local.';
+  }
+
+  // -- AJUDA --
+  if (text.includes('ajuda') || text.includes('help') || text.includes('o que você faz') || text.includes('o que voce faz') || text.includes('comandos') || text === 'menu' || text === 'opções' || text === 'opcoes')
+    return `Posso ajudar com:
+• Abrir apps: "Abrir calculadora, bloco de notas, terminal, VS Code, Steam..."
+• Web: "Abrir Gmail, WhatsApp, YouTube, Spotify, Netflix..."
+• Pesquisa: "Pesquisar [tema]"
+• Lembretes: "Lembre de [algo] em 10 min"
+• Hora, data, clima
+• Conversar: "Vamos conversar"
+• Memória: "Aprenda que [info]"
+Diga o que precisa!`;
+
+  // -- MODO SEGURO --
+  if (text.includes('modo seguro') || text.includes('safe mode')) { safeMode = !safeMode; return safeMode ? 'Modo seguro ativado.' : 'Modo seguro desativado.'; }
+
+  // -- LIMPAR CHAT --
+  if (text.includes('limpar chat') || text.includes('limpar conversa') || text.includes('limpar mensagens')) { const m = $('#messages'); if (m) m.innerHTML = ''; conversationContext = []; return 'Chat limpo.'; }
+
+  // -- ORQUESTRADORES --
+  if (text.includes('hermes') && !text.includes('envie para hermes')) return 'Hermes: orquestrador de agentes. Configure URL em Config.';
+  if (text.includes('openclaw') && !text.includes('envie para openclaw')) return 'OpenClaw: executor local. Configure URL em Config.';
+  if (text.includes('mcp') && !text.includes('envie para mcp')) return 'MCP: Model Context Protocol. Configure URL em Config.';
+
+  // -- NÃO ENTENDEU — PERGUNTAR --
+  if (text.length > 3) {
+    lastQuestion = 'unknown';
+    return 'Não entendi "' + cmd + '". Quer que eu pesquise isso ou abre algo relacionado?';
+  }
+
+  return 'Não entendi. Diga "ajuda" para ver os comandos.';
+}
+
+// -- ORCHESTRATOR --
+async function checkOrch(url, t = 2000) {
+  if (!url) return false;
+  try { const c = new AbortController(); setTimeout(() => c.abort(), t); const r = await fetch(url, { signal: c.signal }); return r.ok; } catch { return false; }
+}
+async function updateOrch() {
+  const c = loadConfig(); const r = {};
+  if (c.HERMES_ENABLED) r.hermes = await checkOrch(c.HERMES_URL + '/api/status');
+  if (c.OPENCLAW_ENABLED) r.openclaw = await checkOrch(c.OPENCLAW_URL + '/api/status');
+  if (c.MCP_ENABLED) r.mcp = await checkOrch(c.MCP_URL);
+  const e = $('#orchestratorStatus'); if (e) {
+    const p = [];
+    if (r.hermes !== undefined) p.push('Hermes: ' + (r.hermes ? '🟢' : '🔴'));
+    if (r.openclaw !== undefined) p.push('OpenClaw: ' + (r.openclaw ? '🟢' : '🔴'));
+    if (r.mcp !== undefined) p.push('MCP: ' + (r.mcp ? '🟢' : '🔴'));
+    e.textContent = p.length ? p.join(' • ') : 'Não configurado.';
+  }
+  return r;
+}
+async function sendOrch(target, cmd) {
+  const c = loadConfig(); const urls = { hermes: c.HERMES_URL, openclaw: c.OPENCLAW_URL, mcp: c.MCP_URL };
+  const url = urls[target]; if (!url) return target + ' não configurado.';
+  try {
+    const r = await fetch(url + '/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: cmd }) });
+    if (r.ok) { const d = await r.json(); return d.text || d.reply || 'Resposta de ' + target + '.'; }
+    return target + ' erro ' + r.status + '.';
+  } catch { return target + ' indisponível.'; }
+}
+
+// -- COMMAND PROCESSOR --
+async function runCommand(cmd, fromVoice) {
+  const prompt = String(cmd || '').trim();
+  const isChatGPTCmd = prompt.startsWith('[CHATGPT]');
+  const displayPrompt = isChatGPTCmd ? prompt.replace('[CHATGPT]', '').trim() : prompt;
+
+  addMessage('<b>Você:</b> ' + esc(displayPrompt), 'user');
+  if (!prompt) { addMessage('<b>JARVIS:</b> Estou ouvindo.', 'assistant'); return; }
+  appendMemory('user', displayPrompt);
+  conversationContext.push({ role: 'user', content: displayPrompt });
+  setMode('THINKING', '◌');
+  const typing = addTyping();
+  try {
+    const lower = prompt.toLowerCase();
+    let reply;
+    if (lower.startsWith('hermes:') || lower.startsWith('hermes ')) reply = await sendOrch('hermes', prompt.replace(/^hermes[:\s]*/i, ''));
+    else if (lower.startsWith('openclaw:') || lower.startsWith('openclaw ')) reply = await sendOrch('openclaw', prompt.replace(/^openclaw[:\s]*/i, ''));
+    else if (lower.startsWith('mcp:') || lower.startsWith('mcp ')) reply = await sendOrch('mcp', prompt.replace(/^mcp[:\s]*/i, ''));
+    else reply = await aiChat(prompt);
+
+    // Se o localReply retornou o sinal de ChatGPT API, não mostra (já foi processado)
+    if (reply === '__CHATGPT_API__') {
+      removeTyping(typing);
+      setMode(listening ? 'LISTENING' : 'PAGES', listening ? '◉' : '◎');
+      return;
+    }
+
+    removeTyping(typing);
+    addMessage('<b>JARVIS:</b> ' + reply, 'assistant');
+    appendMemory('assistant', reply);
+    conversationContext.push({ role: 'assistant', content: reply });
+    if (conversationContext.length > 20) conversationContext = conversationContext.slice(-20);
+    speak(reply);
+  } catch (err) {
+    removeTyping(typing);
+    const reply = 'Erro: ' + err.message;
+    addMessage('<b>JARVIS:</b> ' + reply, 'assistant');
+  } finally { setMode(listening ? 'LISTENING' : 'PAGES', listening ? '◉' : '◎'); }
+}
+
+// -- CONFIG PANEL --
+function renderConfig() {
+  const p = $('#configPanel'); if (!p) return;
+  const c = loadConfig();
+  const provs = [{ v: 'local', l: 'Local' }, { v: 'ollama', l: '🦙 Ollama (Local)' }, { v: 'openrouter', l: 'OpenRouter' }, { v: 'openai', l: 'OpenAI' }, { v: 'nvidia', l: 'NVIDIA NIM' }];
+  p.innerHTML = `<div class="config-section"><h4>🤖 Provedor de IA</h4><select id="cfgProvider">${provs.map(x => `<option value="${x.v}" ${c.AI_PROVIDER === x.v ? 'selected' : ''}>${x.l}</option>`).join('')}</select></div>
+  <div class="config-section" id="cfgOL" style="${c.AI_PROVIDER !== 'ollama' ? 'display:none' : ''}"><h4>🦙 Ollama (IA Local)</h4><label>URL: <input id="cfgOLURL" placeholder="http://localhost:11434" value="${c.OLLAMA_URL}" /></label><label>Modelo: <input id="cfgOLM" placeholder="llama3" value="${c.OLLAMA_MODEL}" /></label><p class="muted">Ollama roda localmente. Sem API key necessária.</p></div>
+  <div class="config-section" id="cfgOR" style="${c.AI_PROVIDER !== 'openrouter' ? 'display:none' : ''}"><h4>🌐 OpenRouter</h4><input id="cfgORK" type="password" placeholder="sk-or-..." value="${c.OPENROUTER_API_KEY}" /><input id="cfgORM" placeholder="Modelo" value="${c.OPENROUTER_MODEL}" /></div>
+  <div class="config-section" id="cfgOA" style="${c.AI_PROVIDER !== 'openai' ? 'display:none' : ''}"><h4>🧠 OpenAI</h4><input id="cfgOAK" type="password" placeholder="sk-..." value="${c.OPENAI_API_KEY}" /><input id="cfgOAM" placeholder="Modelo" value="${c.OPENAI_MODEL}" /><input id="cfgOAB" placeholder="Base URL" value="${c.OPENAI_BASE_URL}" /></div>
+  <div class="config-section" id="cfgNV" style="${c.AI_PROVIDER !== 'nvidia' ? 'display:none' : ''}"><h4>⚡ NVIDIA</h4><input id="cfgNVK" type="password" placeholder="nvapi-..." value="${c.NVIDIA_API_KEY}" /><input id="cfgNVM" placeholder="Modelo" value="${c.NVIDIA_MODEL}" /></div>
+  <div class="config-section"><h4>🎙️ Voz</h4><label>Idioma: <input id="cfgVL" value="${c.VOICE_LANG}" style="width:80px" /></label><label>Velocidade: <input id="cfgVR" type="range" min="0.5" max="2" step="0.1" value="${c.VOICE_RATE}" /><span id="cfgVRV">${c.VOICE_RATE}</span></label><label>Tom: <input id="cfgVP" type="range" min="0.5" max="2" step="0.05" value="${c.VOICE_PITCH}" /><span id="cfgVPV">${c.VOICE_PITCH}</span></label></div>
+  <div class="config-section"><h4>🔗 Orquestradores</h4><label>Hermes: <input id="cfgHU" value="${c.HERMES_URL}" /></label><label>OpenClaw: <input id="cfgOU" value="${c.OPENCLAW_URL}" /></label><label>MCP: <input id="cfgMU" value="${c.MCP_URL}" /></label></div>
+  <div class="config-section"><h4>🛡️ Segurança</h4><select id="cfgAP"><option value="once" ${c.APPROVAL_POLICY === 'once' ? 'selected' : ''}>Aprovar uma vez</option><option value="always" ${c.APPROVAL_POLICY === 'always' ? 'selected' : ''}>Sempre aprovar</option><option value="off" ${c.APPROVAL_POLICY === 'off' ? 'selected' : ''}>Desativado</option></select></div>
+  <div class="config-actions"><button id="cfgSave" class="btn primary">Salvar</button><button id="cfgTest" class="btn">Testar API</button><button id="cfgClear" class="btn danger">Limpar Chaves</button></div>
+  <div id="cfgResult" class="config-test-result"></div>`;
+
+  const ps = $('#cfgProvider'); if (ps) ps.addEventListener('change', () => { const v = ps.value; document.getElementById('cfgOL').style.display = v === 'ollama' ? '' : 'none'; document.getElementById('cfgOR').style.display = v === 'openrouter' ? '' : 'none'; document.getElementById('cfgOA').style.display = v === 'openai' ? '' : 'none'; document.getElementById('cfgNV').style.display = v === 'nvidia' ? '' : 'none'; });
+  const rv = $('#cfgVR'); const rvv = $('#cfgVRV'); if (rv && rvv) rv.addEventListener('input', () => rvv.textContent = rv.value);
+  const pv = $('#cfgVP'); const pvv = $('#cfgVPV'); if (pv && pvv) pv.addEventListener('input', () => pvv.textContent = pv.value);
+
+  $('#cfgSave')?.addEventListener('click', () => {
+    saveConfig({ AI_PROVIDER: $('#cfgProvider')?.value || 'local', OLLAMA_URL: $('#cfgOLURL')?.value?.trim() || 'http://localhost:11434', OLLAMA_MODEL: $('#cfgOLM')?.value?.trim() || 'llama3', OPENROUTER_API_KEY: $('#cfgORK')?.value?.trim() || '', OPENROUTER_MODEL: $('#cfgORM')?.value?.trim() || 'openai/gpt-4o-mini', OPENAI_API_KEY: $('#cfgOAK')?.value?.trim() || '', OPENAI_MODEL: $('#cfgOAM')?.value?.trim() || 'gpt-4o-mini', OPENAI_BASE_URL: $('#cfgOAB')?.value?.trim() || 'https://api.openai.com/v1', NVIDIA_API_KEY: $('#cfgNVK')?.value?.trim() || '', NVIDIA_MODEL: $('#cfgNVM')?.value?.trim() || 'meta/llama-3.1-70b-instruct', VOICE_LANG: $('#cfgVL')?.value?.trim() || 'pt-BR', VOICE_RATE: parseFloat($('#cfgVR')?.value) || 1, VOICE_PITCH: parseFloat($('#cfgVP')?.value) || 0.95, HERMES_URL: $('#cfgHU')?.value?.trim() || 'http://localhost:8001', OPENCLAW_URL: $('#cfgOU')?.value?.trim() || 'http://localhost:8675', MCP_URL: $('#cfgMU')?.value?.trim() || 'http://localhost:3001/mcp', APPROVAL_POLICY: $('#cfgAP')?.value || 'once' });
+    addMessage('<b>JARVIS:</b> Configuração salva.', 'assistant'); speak('Configuração salva.');
+  });
+
+  $('#cfgTest')?.addEventListener('click', async () => {
+    const r = $('#cfgResult'); if (r) r.textContent = 'Testando...';
+    try { const prov = $('#cfgProvider')?.value || 'local'; if (prov === 'local') { if (r) r.textContent = '✅ Modo local.'; return; }
+      const key = prov === 'openrouter' ? $('#cfgORK')?.value : prov === 'openai' ? $('#cfgOAK')?.value : $('#cfgNVK')?.value;
+      if (!key) { if (r) r.textContent = '❌ Sem chave.'; return; }
+      const reply = await aiChat('Responda: OK'); if (r) r.textContent = '✅ OK! Resposta: ' + reply.slice(0, 80);
+    } catch (e) { if (r) r.textContent = '❌ ' + e.message; }
+  });
+
+  $('#cfgClear')?.addEventListener('click', () => { if (confirm('Remover chaves?')) { saveConfig({ OPENAI_API_KEY: '', OPENROUTER_API_KEY: '', NVIDIA_API_KEY: '' }); addMessage('<b>JARVIS:</b> Chaves removidas.', 'assistant'); renderConfig(); } });
+}
+
+// 
+// MAIN RENDER
+// 
+function renderApp() {
+  const c = loadConfig();
+  const hasAI = (c.AI_PROVIDER === 'openrouter' && c.OPENROUTER_API_KEY) || (c.AI_PROVIDER === 'openai' && c.OPENAI_API_KEY) || (c.AI_PROVIDER === 'nvidia' && c.NVIDIA_API_KEY) || (c.AI_PROVIDER === 'ollama' && c.OLLAMA_ENABLED);
+  const aiLabel = c.AI_PROVIDER === 'ollama' ? '🦙 Ollama (' + c.OLLAMA_MODEL + ')' : (c.AI_PROVIDER === 'local' ? 'Modo local' : c.AI_PROVIDER);
+  const greeting = userName ? 'Olá, ' + userName + '!' : 'Olá! Diga seu nome ou peça ajuda.';
+
+  APP.innerHTML = `<header class="topbar"><div class="brand">J·A·R·V·I·S</div><nav><button class="tab active" data-tab="pages">Pages</button><button class="tab" data-tab="config">Config</button></nav><div class="clock" id="clock">--:--:--</div></header>
+  <section class="layout">
+    <aside class="panel left"><h3>◉ STATUS</h3><div id="status" class="orchestrator">${hasAI ? 'IA: ' + aiLabel : 'Modo local. Configure em Config.'}</div><h3>◉ VOZ</h3><div id="voiceStatus" class="orchestrator">Pronta.</div><h3>◉ MEMÓRIA</h3><div id="memStatus" class="orchestrator">${loadMemory().length} entradas • ${listReminders().length} lembretes • ${listAlarms().length} alarmes</div></aside>
+    <main class="center">
+      <section class="screen tabpage active" id="tab-pages"><div class="orb-wrap"><div class="orb"><div class="face"><h1 id="mood">◎</h1><p id="mode">PAGES</p></div></div></div><div class="chatbox" id="messages"></div><div class="composer"><input id="commandInput" placeholder="Diga ou digite seu comando..." /><button id="sendCommand">Enviar</button></div><div class="quick"><button id="testVoice">🔊 Testar voz</button><button id="startVoice">🎙️ Falar</button><button id="stopVoice" style="display:none">⏹️ Parar</button><button id="openYouTube">📺 YouTube</button><button id="openBrowser">🌐 Pesquisar</button></div><div class="quick" style="margin-top:8px"><button id="openChatGPT">🤖 ChatGPT</button><button id="openChatGPTImage">🎨 Criar Imagem</button><button id="openChatGPTCode">💻 Programar</button></div><p class="muted">Voz contínua. Programas do PC. ChatGPT. Diálogo natural. Diga "ajuda".</p></section>
+      <section class="screen tabpage" id="tab-config"><h2>⚙️ Configuração</h2><div id="configPanel"></div></section>
+    </main>
+    <aside class="panel right"><h3>▸ OBSERVAÇÕES</h3><div class="orchestrator"><p><b>Pages:</b> ativo.</p><p><b>JARVIS v3.0</b></p><p>Voz contínua.</p><p>Diálogo natural.</p></div><h3>▸ ORQUESTRADOR</h3><div id="orchestratorStatus" class="orchestrator">Verificando...</div></aside>
+  </section>`;
+
+  // Tabs
+  document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => { document.querySelectorAll('.tab').forEach(x => x.classList.remove('active')); document.querySelectorAll('.tabpage').forEach(x => x.classList.remove('active')); t.classList.add('active'); const el = document.getElementById('tab-' + t.dataset.tab); if (el) el.classList.add('active'); if (t.dataset.tab === 'config') renderConfig(); }));
+  // Clock
+  function tick() { const e = $('#clock'); if (e) e.textContent = new Date().toLocaleTimeString('pt-BR'); } setInterval(tick, 1000); tick();
+  // Send
+  $('#sendCommand')?.addEventListener('click', () => { const i = $('#commandInput'); if (i) { runCommand(i.value.trim()); i.value = ''; } });
+  $('#commandInput')?.addEventListener('keydown', e => { if (e.key === 'Enter') { const i = $('#commandInput'); if (i) { runCommand(i.value.trim()); i.value = ''; } } });
+  // Voice
+  $('#testVoice')?.addEventListener('click', () => { addMessage('<b>Você:</b> testar voz', 'user'); const r = 'Voz online.'; addMessage('<b>JARVIS:</b> ' + r, 'assistant'); speak(r); });
+  $('#startVoice')?.addEventListener('click', () => { startListening(); const s = $('#startVoice'); const p = $('#stopVoice'); if (s) { s.style.display = 'none'; } if (p) { p.style.display = ''; p.classList.add('listening'); } });
+  $('#stopVoice')?.addEventListener('click', () => { stopListening(); stopSpeaking(); const s = $('#startVoice'); const p = $('#stopVoice'); if (s) s.style.display = ''; if (p) { p.style.display = 'none'; p.classList.remove('listening'); } });
+  // Quick
+  $('#openYouTube')?.addEventListener('click', () => { addMessage('<b>Você:</b> Abrir YouTube', 'user'); window.open('https://www.youtube.com', '_blank'); const r = 'Abrindo YouTube.'; addMessage('<b>JARVIS:</b> ' + r, 'assistant'); speak(r); });
+  $('#openBrowser')?.addEventListener('click', () => { const q = prompt('Pesquisar:'); if (q) { addMessage('<b>Você:</b> Pesquisar: ' + q, 'user'); window.open('https://www.google.com/search?q=' + encodeURIComponent(q), '_blank'); const r = 'Pesquisando "' + q + '".'; addMessage('<b>JARVIS:</b> ' + r, 'assistant'); speak(r); } });
+  // ChatGPT buttons
+  $('#openChatGPT')?.addEventListener('click', () => { window.open('https://chat.openai.com/?model=auto', '_blank'); addMessage('<b>JARVIS:</b> 🤖 Abrindo ChatGPT.', 'assistant'); speak('Abrindo ChatGPT.'); });
+  $('#openChatGPTImage')?.addEventListener('click', () => { const q = prompt('Descreva a imagem:'); if (q) { window.open('https://chat.openai.com/?model=auto', '_blank'); addMessage('<b>JARVIS:</b> 🎨 ChatGPT aberto. Cole: "Crie uma imagem de ' + q + '"', 'assistant'); speak('ChatGPT aberto. Cole o prompt de imagem.'); } });
+  $('#openChatGPTCode')?.addEventListener('click', () => { const q = prompt('O que o programa deve fazer?'); if (q) { window.open('https://chat.openai.com/?model=auto', '_blank'); addMessage('<b>JARVIS:</b> 💻 ChatGPT aberto. Cole: "Escreva um programa que ' + q + '"', 'assistant'); speak('ChatGPT aberto. Cole o prompt de programação.'); } });
+  // Orch
+  updateOrch(); setInterval(updateOrch, 30000);
+  // Reminders — fala 3 vezes com áudio alto
+  setInterval(() => {
+    const d = dueReminders();
+    if (d.length) {
+      const reminder = d[0];
+      let count = 0;
+      const reminderInterval = setInterval(() => {
+        count++;
+        if (count <= 3) {
+          const msg = '⏰ Lembrete: ' + reminder.text;
+          addMessage('<b>JARVIS:</b> ' + msg, 'assistant');
+          speak(msg + '! Atenção, ' + (userName || 'Senhor') + '!');
+        } else {
+          clearInterval(reminderInterval);
+        }
+      }, 4000);
+      // Toca som de notificação se possível
+      try {
+        if ('AudioContext' in window) {
+          const actx = new AudioContext();
+          const osc = actx.createOscillator();
+          const gain = actx.createGain();
+          osc.connect(gain);
+          gain.connect(actx.destination);
+          osc.frequency.value = 880;
+          gain.gain.value = 0.3;
+          osc.start();
+          setTimeout(() => { osc.stop(); actx.close(); }, 600);
+        }
+      } catch {}
+      // Marca como feito após 3 avisos
+      setTimeout(() => {
+        const r = loadReminders();
+        const it = r.find(x => x.id === reminder.id);
+        if (it) { it.done = true; saveReminders(r); }
+      }, 15000);
+    }
+  }, 15000); // Verifica a cada 15 segundos
+
+  // Mem status
+  setInterval(() => { const e = $('#memStatus'); if (e) e.textContent = loadMemory().length + ' entradas • ' + listReminders().length + ' lembretes • ' + listAlarms().length + ' alarmes'; }, 10000);
+  // Visibility change — reinicia reconhecimento quando aba volta ao foco
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && listening && recognition) {
+      try { recognition.start(); } catch {}
+    }
+  });
+  // Reagenda alarmes ao carregar
+  rescheduleAlarms();
+  // Auto-detecta Ollama se estiver rodando localmente
+  (async () => {
+    const cfg = loadConfig();
+    if (cfg.AI_PROVIDER === 'ollama' && cfg.OLLAMA_ENABLED) {
+      try {
+        const r = await fetch(cfg.OLLAMA_URL.replace(/\/$/, '') + '/api/tags', { method: 'GET', signal: AbortSignal.timeout(3000) });
+        if (r.ok) {
+          addMessage('<b>JARVIS:</b> 🦙 Ollama detectado e conectado!', 'assistant');
+        } else {
+          throw new Error('not ok');
+        }
+      } catch {
+        addMessage('<b>JARVIS:</b> ⚠️ Ollama não encontrado em ' + cfg.OLLAMA_URL + '. Diga "remove ollama" para desativar.', 'assistant');
+      }
+    }
+  })();
+  // Init msg
+  addMessage('<b>JARVIS:</b> ' + greeting + ' Voz contínua, alarmes, lembretes com áudio, ChatGPT. Diga "ajuda" para comandos.', 'assistant');
+}
+
+// ── INIT ──
+// Auto-detecta Ollama ao carregar (se nenhum outro provedor estiver configurado)
+async function autoDetectOllama() {
+  const cfg = loadConfig();
+  const hasOtherAPI = (cfg.AI_PROVIDER === 'openrouter' && cfg.OPENROUTER_API_KEY) ||
+                      (cfg.AI_PROVIDER === 'openai' && cfg.OPENAI_API_KEY) ||
+                      (cfg.AI_PROVIDER === 'nvidia' && cfg.NVIDIA_API_KEY);
+  if (!hasOtherAPI && cfg.AI_PROVIDER === 'local') {
+    try {
+      const r = await fetch('http://localhost:11434/api/tags', { method: 'GET', signal: AbortSignal.timeout(2000) });
+      if (r.ok) {
+        saveConfig({ AI_PROVIDER: 'ollama', OLLAMA_ENABLED: true });
+        window._ollamaAutoDetected = true;
+      }
+    } catch {}
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  autoDetectOllama().then(() => renderApp());
+});
