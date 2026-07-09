@@ -443,6 +443,22 @@ function localReply(cmd) {
     return 'Voltando para a tela principal.';
   }
 
+  // atalhos diretos de apps
+  const directApps = {
+    'word': 'word', 'excel': 'excel', 'powerpoint': 'powerpoint', 'power point': 'powerpoint',
+    'outlook': 'outlook', 'onenote': 'onenote', 'teams': 'teams', 'access': 'access', 'publisher': 'publisher',
+    'bloco de notas': 'bloco de notas', 'notepad': 'bloco de notas', 'notas': 'bloco de notas',
+    'calculadora': 'calculadora', 'calc': 'calculadora', 'paint': 'paint', 'pintura': 'paint',
+    'terminal': 'terminal', 'cmd': 'cmd', 'prompt': 'cmd', 'vscode': 'vscode', 'visual studio code': 'vscode',
+    'explorador': 'explorador', 'arquivos': 'explorador', 'desktop': 'desktop', 'downloads': 'downloads', 'documentos': 'documentos',
+    'imagens': 'imagens', 'fotos': 'fotos', 'vídeos': 'videos', 'videos': 'videos', 'configurações': 'config', 'configuracoes': 'config', 'config': 'config'
+  };
+  if (directApps[compact]) {
+    const quick = tryOpenApp(directApps[compact]);
+    if (quick) return quick;
+    if (directApps[compact] === 'config') { document.querySelector('.tab[data-tab="config"]')?.click(); return 'Abrindo configurações.'; }
+  }
+
   // backup / restauração local
   if (compact.includes('exportar meus dados') || compact.includes('baixar meus dados') || compact.includes('fazer backup') || compact.includes('salvar backup')) {
     downloadJsonFile('jarvis-backup-' + new Date().toISOString().slice(0, 10) + '.json', exportJarvisData());
@@ -563,6 +579,11 @@ function localReply(cmd) {
   // -- STATUS --
   if (text === 'status' || text.includes('como você está') || text.includes('tudo bem'))
     return 'Sistema OK. Memória: ' + loadMemory().length + ' entradas. Lembretes: ' + listReminders().length + '.';
+  if (text.includes('status detalhado') || text.includes('resumo do sistema') || text.includes('visão geral') || text.includes('visao geral')) {
+    const c = loadConfig();
+    const ai = (c.AI_PROVIDER === 'local' ? 'local' : c.AI_PROVIDER) + (c.AI_PROVIDER === 'ollama' ? ' (' + c.OLLAMA_MODEL + ')' : '');
+    return 'Resumo rápido: IA ' + ai + ', memória ' + loadMemory().length + ', lembretes ' + listReminders().length + ', alarmes ' + listAlarms().length + '.';
+  }
 
   // -- VOZ --
   if (text.includes('testar voz') || text.includes('testa voz') || text === 'fala' || text === 'voz')
@@ -747,7 +768,7 @@ function localReply(cmd) {
   // -- ABRIR PROGRAMAS DO PC --
   const openMatch = text.match(/(?:abrir|abre|abra|executar|execute|inicie|iniciar)\s+(?:o|a|os|as)?\s*(.+)/i);
   if (openMatch) {
-    const app = openMatch[1].trim();
+    const app = openMatch[1].trim().replace(/^(o|a|os|as|meu|minha|minhas|meus|pasta|programa|aplicativo|app|software|utilitário|utilitario)\s+/i, '').replace(/\s+(do|da|de|no|na|nos|nas|do windows|do pc)$/i, '').trim();
     const webApps = ['gmail','outlook','yahoo','whatsapp','instagram','twitter','facebook','linkedin','telegram','discord','slack','teams','zoom','meet','skype','netflix','spotify','disney','hbo','max','prime','twitch','apple tv','globoplay','drive','docs','sheets','calendar','notion','trello','github','gitlab','figma','canva','dropbox','onedrive','amazon','mercado','olx','shopee','nubank','ifood','rappi','notícia','noticia','g1','uol','cnn','folha','maps','waze','uber','99','navegador','browser','google','youtube','email','e-mail','correio','pesquisar','buscar','procurar'];
     if (!webApps.some(w => app.toLowerCase().includes(w))) {
       const result = tryOpenApp(app);
@@ -1028,7 +1049,7 @@ function renderApp() {
       <section class="screen tabpage active" id="tab-pages"><div class="orb-wrap"><div class="orb"><div class="face"><h1 id="mood">◎</h1><p id="mode">PAGES</p></div></div></div><div class="chatbox" id="messages"></div><div class="composer"><input id="commandInput" placeholder="Diga ou digite seu comando..." /><button id="sendCommand">Enviar</button></div><div class="quick"><button id="testVoice">🔊 Testar voz</button><button id="startVoice">🎙️ Falar</button><button id="stopVoice" style="display:none">⏹️ Parar</button><button id="openYouTube">📺 YouTube</button><button id="openBrowser">🌐 Pesquisar</button></div><div class="quick" style="margin-top:8px"><button id="openChatGPT">🤖 ChatGPT</button><button id="openChatGPTImage">🎨 Criar Imagem</button><button id="openChatGPTCode">💻 Programar</button><button id="exportData">📦 Backup</button><button id="importData">📥 Importar</button><button id="resetData">🧹 Limpar</button></div><p class="muted">Voz contínua. Programas do PC. ChatGPT. Diálogo natural. Diga "ajuda".</p></section>
       <section class="screen tabpage" id="tab-config"><h2>⚙️ Configuração</h2><div id="configPanel"></div></section>
     </main>
-    <aside class="panel right"><h3>▸ OBSERVAÇÕES</h3><div class="orchestrator"><p><b>Pages:</b> ativo.</p><p><b>JARVIS v4.0</b></p><p>Voz contínua.</p><p>Diálogo natural.</p></div><h3>▸ ORQUESTRADOR</h3><div id="orchestratorStatus" class="orchestrator">Verificando...</div></aside>
+    <aside class="panel right"><h3>▸ OBSERVAÇÕES</h3><div class="orchestrator"><p><b>Pages:</b> ativo.</p><p><b>JARVIS v4.1</b></p><p>Voz contínua.</p><p>Diálogo natural.</p></div><h3>▸ ORQUESTRADOR</h3><div id="orchestratorStatus" class="orchestrator">Verificando...</div></aside>
   </section>`;
 
   // Tabs
