@@ -633,8 +633,9 @@ function localReply(cmd) {
   }
 
   // -- YOUTUBE --
-  if (text.includes('youtube') || text.includes('abrir yt') || text === 'yt') { window.open('https://www.youtube.com', '_blank'); return 'Abrindo YouTube.'; }
-  const ytM = text.match(/(?:pesquisar|buscar|procurar|tocar|ouvir)\s+(?:no\s+)?youtube\s+(.+)/i) || text.match(/youtube\s+(.+)/i);
+  const wantsYouTube = /you\s*tube/i.test(text) || text.includes('youtube') || text.includes('abrir yt') || text === 'yt';
+  if (wantsYouTube) { window.open('https://www.youtube.com', '_blank'); return 'Abrindo YouTube.'; }
+  const ytM = text.match(/(?:pesquisar|buscar|procurar|tocar|ouvir)\s+(?:no\s+)?you\s*tube\s+(.+)/i) || text.match(/(?:pesquisar|buscar|procurar|tocar|ouvir)\s+(?:no\s+)?youtube\s+(.+)/i) || text.match(/you\s*tube\s+(.+)/i) || text.match(/youtube\s+(.+)/i);
   if (ytM) { window.open('https://www.youtube.com/results?search_query=' + encodeURIComponent(ytM[1].trim()), '_blank'); return 'Pesquisando "' + ytM[1].trim() + '" no YouTube.'; }
 
   // -- PESQUISA --
@@ -688,8 +689,9 @@ function localReply(cmd) {
   if (text.includes('reddit')) { window.open('https://www.reddit.com', '_blank'); return 'Abrindo Reddit.'; }
 
   // -- STREAMING --
+  const wantsSpotify = /spot\s*fy/i.test(text) || text.includes('spotify');
   if (text.includes('netflix')) { window.open('https://www.netflix.com', '_blank'); return 'Abrindo Netflix.'; }
-  if (text.includes('spotify')) { window.open('https://open.spotify.com', '_blank'); return 'Abrindo Spotify.'; }
+  if (wantsSpotify) { window.open('https://open.spotify.com', '_blank'); return 'Abrindo Spotify.'; }
   if (text.includes('disney') || text.includes('disney+')) { window.open('https://www.disneyplus.com', '_blank'); return 'Abrindo Disney+.'; }
   if (text.includes('hbo') || text.includes('max')) { window.open('https://www.max.com', '_blank'); return 'Abrindo HBO Max.'; }
   if (text.includes('prime video') || text.includes('amazon prime')) { window.open('https://www.primevideo.com', '_blank'); return 'Abrindo Prime Video.'; }
@@ -740,21 +742,22 @@ function localReply(cmd) {
   //
   function tryOpenApp(appName) {
     const a = appName.toLowerCase().trim();
+    const userFolder = 'Usuario';
     const prot = {
       'calculadora': 'ms-calculator:', 'calc': 'ms-calculator:', 'calculador': 'ms-calculator:',
       'bloco de notas': 'notepad:', 'notepad': 'notepad:', 'bloco': 'notepad:', 'notas': 'notepad:',
       'paint': 'ms-paint:', 'pintura': 'ms-paint:',
       'explorador': 'file:///C:/', 'arquivos': 'file:///C:/', 'gerenciador de arquivos': 'file:///C:/',
-      'documentos': 'file:///C://Users/' + (process?.env?.USERNAME || 'Usuario') + '/Documents',
-      'downloads': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Downloads',
-      'música': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Music',
-      'musica': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Music',
-      'imagens': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Pictures',
-      'fotos': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Pictures',
-      'vídeos': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Videos',
-      'videos': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Videos',
-      'desktop': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Desktop',
-      'area de trabalho': 'file:///C:/Users/' + (process?.env?.USERNAME || 'Usuario') + '/Desktop',
+      'documentos': 'file:///C://Users/' + userFolder + '/Documents',
+      'downloads': 'file:///C:/Users/' + userFolder + '/Downloads',
+      'música': 'file:///C:/Users/' + userFolder + '/Music',
+      'musica': 'file:///C:/Users/' + userFolder + '/Music',
+      'imagens': 'file:///C:/Users/' + userFolder + '/Pictures',
+      'fotos': 'file:///C:/Users/' + userFolder + '/Pictures',
+      'vídeos': 'file:///C:/Users/' + userFolder + '/Videos',
+      'videos': 'file:///C:/Users/' + userFolder + '/Videos',
+      'desktop': 'file:///C:/Users/' + userFolder + '/Desktop',
+      'area de trabalho': 'file:///C:/Users/' + userFolder + '/Desktop',
       'configurações': 'ms-settings:', 'configuracoes': 'ms-settings:', 'config': 'ms-settings:',
       'painel de controle': 'control:', 'painel': 'control:',
       'terminal': 'wt:', 'cmd': 'cmd:', 'prompt': 'cmd:',
